@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sant0-9/pulp/internal/config"
-	"github.com/sant0-9/pulp/internal/document"
+	"github.com/sant0-9/pulp/internal/converter"
 	"github.com/sant0-9/pulp/internal/llm"
 )
 
@@ -225,7 +225,7 @@ func (a *App) handleInput() tea.Cmd {
 
 func (a *App) loadDocument(path string) tea.Cmd {
 	return func() tea.Msg {
-		converter, err := document.NewConverter()
+		converter, err := converter.NewConverter()
 		if err != nil {
 			return documentErrorMsg{err}
 		}
@@ -292,7 +292,7 @@ type setupErrorMsg struct{ error }
 type providerReadyMsg struct{}
 type providerErrorMsg struct{ error }
 type documentLoadedMsg struct {
-	doc *document.Document
+	doc *converter.Document
 }
 type documentErrorMsg struct{ error }
 
