@@ -1,6 +1,9 @@
 # Binary
 /pulp
 
+# Blueprint (local planning docs)
+blueprint/
+
 # IDE
 .idea/
 .vscode/
