@@ -3,6 +3,7 @@ package tui
 import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/sant0-9/pulp/internal/config"
+	"github.com/sant0-9/pulp/internal/document"
 	"github.com/sant0-9/pulp/internal/llm"
 )
 
@@ -17,8 +18,10 @@ type state struct {
 	apiKeyInput      textinput.Model
 
 	// Document state
+	document     *document.Document
 	documentPath string
-	documentInfo string
+	loadingDoc   bool
+	docError     error
 
 	// Processing
 	processing   bool

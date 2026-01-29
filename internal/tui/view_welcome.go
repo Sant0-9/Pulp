@@ -24,7 +24,13 @@ func (a *App) renderWelcome() string {
 
 	// Provider status
 	var status string
-	if a.state.providerError != nil {
+	if a.state.loadingDoc {
+		status = styleSubtitle.Render("Loading document...")
+	} else if a.state.docError != nil {
+		status = lipgloss.NewStyle().
+			Foreground(colorError).
+			Render(fmt.Sprintf("Error: %s", a.state.docError))
+	} else if a.state.providerError != nil {
 		status = lipgloss.NewStyle().
 			Foreground(colorError).
 			Render(fmt.Sprintf("Provider error: %s", a.state.providerError))

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sant0-9/pulp/internal/config"
+	"github.com/sant0-9/pulp/internal/document"
 	"github.com/sant0-9/pulp/internal/llm"
 )
 
@@ -115,6 +116,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case providerErrorMsg:
 		a.state.providerError = msg.error
 		return a, nil
+
+	case documentLoadedMsg:
+		a.state.loadingDoc = false
+		a.state.document = msg.doc
+		a.state.docError = nil
+		a.view = viewDocument
+		a.state.input.Reset()
+		a.state.input.Placeholder = "What do you want to do with this document?"
+		a.state.input.Focus()
+		return a, textinput.Blink
+
+	case documentErrorMsg:
+		a.state.loadingDoc = false
+		a.state.docError = msg.error
+		return a, nil
 	}
 
 	// Update text inputs based on view
@@ -153,6 +169,19 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
+	// Handle 'n' for new document
+	if msg.String() == "n" {
+		if a.view == viewDocument || a.view == viewResult {
+			a.state.document = nil
+			a.state.documentPath = ""
+			a.state.docError = nil
+			a.state.input.Reset()
+			a.state.input.Placeholder = "/help for commands, or drop a file..."
+			a.view = viewWelcome
+			return nil
+		}
+	}
+
 	// View-specific handling
 	switch a.view {
 	case viewSetup:
@@ -186,9 +215,29 @@ func (a *App) handleInput() tea.Cmd {
 		}
 	}
 
-	// TODO: handle file paths and other input
+	// Handle file path input
+	a.state.loadingDoc = true
+	a.state.documentPath = input
+	a.state.docError = nil
 	a.state.input.Reset()
-	return nil
+	return a.loadDocument(input)
+}
+
+func (a *App) loadDocument(path string) tea.Cmd {
+	return func() tea.Msg {
+		converter, err := document.NewConverter()
+		if err != nil {
+			return documentErrorMsg{err}
+		}
+
+		ctx := context.Background()
+		doc, err := converter.Convert(ctx, path)
+		if err != nil {
+			return documentErrorMsg{err}
+		}
+
+		return documentLoadedMsg{doc}
+	}
 }
 
 func (a *App) handleSetupKey(msg tea.KeyMsg) tea.Cmd {
@@ -242,6 +291,10 @@ type setupCompleteMsg struct{}
 type setupErrorMsg struct{ error }
 type providerReadyMsg struct{}
 type providerErrorMsg struct{ error }
+type documentLoadedMsg struct {
+	doc *document.Document
+}
+type documentErrorMsg struct{ error }
 
 func (a *App) View() string {
 	if a.quitting {
@@ -253,6 +306,8 @@ func (a *App) View() string {
 		return a.renderWelcome()
 	case viewSetup:
 		return a.renderSetup()
+	case viewDocument:
+		return a.renderDocument()
 	case viewSettings:
 		return a.renderSettings()
 	case viewHelp:
