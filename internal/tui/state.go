@@ -3,6 +3,7 @@ package tui
 import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/sant0-9/pulp/internal/config"
+	"github.com/sant0-9/pulp/internal/llm"
 )
 
 type state struct {
@@ -33,6 +34,12 @@ type state struct {
 
 	// History
 	history []message
+
+	// Provider
+	provider      llm.Provider
+	localProvider llm.Provider
+	providerReady bool
+	providerError error
 }
 
 type message struct {
@@ -42,7 +49,7 @@ type message struct {
 
 func newState() *state {
 	input := textinput.New()
-	input.Placeholder = "Drop a file or type a path..."
+	input.Placeholder = "/help for commands, or drop a file..."
 	input.CharLimit = 500
 	input.Width = 60
 

@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"fmt"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 const logo = `
  ██████╗ ██╗   ██╗██╗     ██████╗
@@ -18,18 +22,42 @@ func (a *App) renderWelcome() string {
 	// Subtitle
 	subtitle := styleSubtitle.Render("Document Intelligence")
 
-	// Instructions
-	instructions := styleSubtitle.Render("\nDrop a file or type a path to get started")
+	// Provider status
+	var status string
+	if a.state.providerError != nil {
+		status = lipgloss.NewStyle().
+			Foreground(colorError).
+			Render(fmt.Sprintf("Provider error: %s", a.state.providerError))
+	} else if a.state.providerReady {
+		providerName := a.state.config.Provider
+		status = lipgloss.NewStyle().
+			Foreground(colorSuccess).
+			Render(fmt.Sprintf("Connected to %s", providerName))
+	} else {
+		status = styleSubtitle.Render("Connecting...")
+	}
+
+	// Input (only show if ready)
+	var inputSection string
+	if a.state.providerReady {
+		inputSection = styleBox.Copy().
+			Width(60).
+			BorderForeground(colorSecondary).
+			Render(a.state.input.View())
+	}
 
 	// Status bar
-	statusBar := styleStatusBar.Render("[Esc] Quit  [?] Help")
+	statusBar := styleStatusBar.Render("[s] Settings  [?] Help  [Esc] Quit")
 
 	// Combine main content
 	content := lipgloss.JoinVertical(
 		lipgloss.Center,
 		logoRendered,
 		subtitle,
-		instructions,
+		"",
+		status,
+		"",
+		inputSection,
 	)
 
 	// Center content on screen (leave room for status bar)

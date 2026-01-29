@@ -1,10 +1,15 @@
 package tui
 
 import (
+	"context"
+	"strings"
+	"time"
+
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sant0-9/pulp/internal/config"
+	"github.com/sant0-9/pulp/internal/llm"
 )
 
 type view int
@@ -16,6 +21,7 @@ const (
 	viewProcessing
 	viewResult
 	viewSettings
+	viewHelp
 )
 
 type App struct {
@@ -47,8 +53,33 @@ func NewApp() *App {
 func (a *App) Init() tea.Cmd {
 	if a.state.needsSetup {
 		a.view = viewSetup
+		return tea.Batch(tea.WindowSize(), textinput.Blink)
 	}
-	return tea.Batch(tea.WindowSize(), textinput.Blink)
+
+	// Test provider connection
+	return tea.Batch(
+		tea.WindowSize(),
+		textinput.Blink,
+		a.testProvider(),
+	)
+}
+
+func (a *App) testProvider() tea.Cmd {
+	return func() tea.Msg {
+		provider, err := llm.NewProvider(a.state.config)
+		if err != nil {
+			return providerErrorMsg{err}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := provider.Ping(ctx); err != nil {
+			return providerErrorMsg{err}
+		}
+
+		return providerReadyMsg{}
+	}
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -68,11 +99,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case setupCompleteMsg:
 		a.state.needsSetup = false
 		a.view = viewWelcome
-		a.state.input.Focus()
-		return a, textinput.Blink
+		return a, a.testProvider()
 
 	case setupErrorMsg:
 		// TODO: show error
+		return a, nil
+
+	case providerReadyMsg:
+		a.state.providerReady = true
+		provider, _ := llm.NewProvider(a.state.config)
+		a.state.provider = provider
+		a.state.input.Focus()
+		return a, textinput.Blink
+
+	case providerErrorMsg:
+		a.state.providerError = msg.error
 		return a, nil
 	}
 
@@ -93,7 +134,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, keys.Quit):
-		if a.view == viewSettings {
+		if a.view == viewSettings || a.view == viewHelp {
 			a.view = viewWelcome
 			return nil
 		}
@@ -106,10 +147,9 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.quitting = true
 		return tea.Quit
 
-	case msg.String() == "s":
-		if a.view == viewWelcome && !a.state.needsSetup {
-			a.view = viewSettings
-			return nil
+	case key.Matches(msg, keys.Enter):
+		if a.view == viewWelcome && a.state.providerReady {
+			return a.handleInput()
 		}
 	}
 
@@ -119,6 +159,35 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return a.handleSetupKey(msg)
 	}
 
+	return nil
+}
+
+func (a *App) handleInput() tea.Cmd {
+	input := strings.TrimSpace(a.state.input.Value())
+	if input == "" {
+		return nil
+	}
+
+	// Handle slash commands
+	if strings.HasPrefix(input, "/") {
+		cmd := strings.ToLower(input)
+		switch {
+		case cmd == "/help" || cmd == "/h":
+			a.view = viewHelp
+			a.state.input.Reset()
+			return nil
+		case cmd == "/settings" || cmd == "/s":
+			a.view = viewSettings
+			a.state.input.Reset()
+			return nil
+		case cmd == "/quit" || cmd == "/q":
+			a.quitting = true
+			return tea.Quit
+		}
+	}
+
+	// TODO: handle file paths and other input
+	a.state.input.Reset()
 	return nil
 }
 
@@ -171,6 +240,8 @@ func (a *App) finishSetup() tea.Cmd {
 
 type setupCompleteMsg struct{}
 type setupErrorMsg struct{ error }
+type providerReadyMsg struct{}
+type providerErrorMsg struct{ error }
 
 func (a *App) View() string {
 	if a.quitting {
@@ -184,6 +255,8 @@ func (a *App) View() string {
 		return a.renderSetup()
 	case viewSettings:
 		return a.renderSettings()
+	case viewHelp:
+		return a.renderHelp()
 	default:
 		return a.renderWelcome()
 	}
