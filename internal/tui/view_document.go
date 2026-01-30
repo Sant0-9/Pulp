@@ -87,15 +87,10 @@ func (a *App) renderDocument() string {
 		b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, parsingLabel))
 		b.WriteString("\n\n")
 	} else if a.state.currentIntent != nil {
-		i := a.state.currentIntent
-		intentInfo := fmt.Sprintf(
-			"Parsed: action=%s, tone=%s, audience=%s, format=%s",
-			i.Action, i.Tone, i.Audience, i.Format,
-		)
 		intentBox := styleBox.Copy().
 			Width(min(70, a.width-4)).
 			Foreground(colorSecondary).
-			Render(intentInfo)
+			Render(fmt.Sprintf("> %s", a.state.currentIntent.RawPrompt))
 		b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, intentBox))
 		b.WriteString("\n\n")
 	}

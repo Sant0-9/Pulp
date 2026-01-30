@@ -353,8 +353,8 @@ func (a *App) parseIntent(instruction string) tea.Cmd {
 
 		parsed, err := parser.Parse(ctx, instruction)
 		if err != nil {
-			// Use defaults on error
-			parsed = intent.DefaultIntent(instruction)
+			// Use simple intent on error
+			parsed = intent.New(instruction)
 		}
 
 		return intentParsedMsg{parsed}

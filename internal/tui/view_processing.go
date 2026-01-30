@@ -27,11 +27,7 @@ func (a *App) renderProcessing() string {
 
 	// Intent info
 	if a.state.currentIntent != nil {
-		intentInfo := styleSubtitle.Render(fmt.Sprintf(
-			"Task: %s | Tone: %s",
-			a.state.currentIntent.Action,
-			a.state.currentIntent.Tone,
-		))
+		intentInfo := styleSubtitle.Render(fmt.Sprintf("> %s", a.state.currentIntent.RawPrompt))
 		b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, intentInfo))
 		b.WriteString("\n\n")
 	}
