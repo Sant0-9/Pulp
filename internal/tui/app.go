@@ -368,7 +368,8 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 				// TODO: cancel streaming
 				return nil
 			}
-			a.state.chatSkill = nil // Clear active skill
+			a.state.chatSkill = nil       // Clear active skill
+			a.state.chatScrollOffset = 0  // Reset scroll
 			a.view = viewWelcome
 			a.state.input.Reset()
 			a.state.input.Placeholder = "/help for commands, or drop a file..."
@@ -490,6 +491,43 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.view = viewHelp
 				return nil
 			}
+		}
+	}
+
+	// Chat view scroll handling
+	if a.view == viewChat {
+		switch msg.String() {
+		case "up", "k":
+			a.state.chatScrollOffset += 3
+			a.state.chatAutoScroll = false
+			return nil
+		case "down", "j":
+			a.state.chatScrollOffset -= 3
+			if a.state.chatScrollOffset < 0 {
+				a.state.chatScrollOffset = 0
+				a.state.chatAutoScroll = true
+			}
+			return nil
+		case "pgup", "ctrl+u":
+			a.state.chatScrollOffset += 10
+			a.state.chatAutoScroll = false
+			return nil
+		case "pgdown", "ctrl+d":
+			a.state.chatScrollOffset -= 10
+			if a.state.chatScrollOffset < 0 {
+				a.state.chatScrollOffset = 0
+				a.state.chatAutoScroll = true
+			}
+			return nil
+		case "home", "g":
+			// Scroll to top - will be clamped in render
+			a.state.chatScrollOffset = 99999
+			a.state.chatAutoScroll = false
+			return nil
+		case "end", "G":
+			a.state.chatScrollOffset = 0
+			a.state.chatAutoScroll = true
+			return nil
 		}
 	}
 
@@ -917,7 +955,9 @@ func (a *App) initStreamStats() {
 	a.state.streamTokens = 0
 	a.state.streamPhase = "connecting"
 	a.state.spinnerFrame = 0
-	a.state.lastStats = "" // Clear previous stats
+	a.state.lastStats = ""          // Clear previous stats
+	a.state.chatScrollOffset = 0    // Scroll to bottom
+	a.state.chatAutoScroll = true   // Enable auto-scroll
 
 	// Calculate input context (system prompt + history)
 	systemPrompt := a.buildChatSystemPrompt()

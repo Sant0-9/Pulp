@@ -92,6 +92,10 @@ type state struct {
 	spinnerFrame   int
 	loadingMessage string
 	lastStats      string // Persisted stats from last stream
+
+	// Chat scroll
+	chatScrollOffset int  // Lines scrolled up from bottom (0 = at bottom)
+	chatAutoScroll   bool // Auto-scroll to bottom on new content
 }
 
 type cmdItem struct {

@@ -64,7 +64,7 @@ func (a *App) renderChat() string {
 	header.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, modelLine))
 	header.WriteString("\n\n")
 
-	// === BUILD MESSAGE LINES (collect all, then trim to fit) ===
+	// === BUILD ALL MESSAGE LINES ===
 	var messageLines []string
 
 	for i, msg := range a.state.chatHistory {
@@ -123,9 +123,40 @@ func (a *App) renderChat() string {
 		}
 	}
 
-	// Trim to fit available height (keep most recent)
-	if len(messageLines) > availableHeight {
-		messageLines = messageLines[len(messageLines)-availableHeight:]
+	// === APPLY SCROLL ===
+	totalLines := len(messageLines)
+
+	// Clamp scroll offset
+	maxScroll := totalLines - availableHeight
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if a.state.chatScrollOffset > maxScroll {
+		a.state.chatScrollOffset = maxScroll
+	}
+	if a.state.chatScrollOffset < 0 {
+		a.state.chatScrollOffset = 0
+	}
+
+	// Auto-scroll to bottom when streaming
+	if a.state.chatAutoScroll {
+		a.state.chatScrollOffset = 0
+	}
+
+	// Calculate visible range (scroll from bottom)
+	endIdx := totalLines - a.state.chatScrollOffset
+	startIdx := endIdx - availableHeight
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if endIdx > totalLines {
+		endIdx = totalLines
+	}
+
+	// Get visible lines
+	var visibleLines []string
+	if startIdx < endIdx && len(messageLines) > 0 {
+		visibleLines = messageLines[startIdx:endIdx]
 	}
 
 	// === BUILD INPUT/STATUS ===
@@ -145,7 +176,7 @@ func (a *App) renderChat() string {
 		footer.WriteString("\n")
 	}
 
-	// Status bar
+	// Status bar with scroll indicator
 	var status string
 	if a.state.chatStreaming {
 		streamStatus := a.buildStreamStatus()
@@ -153,21 +184,28 @@ func (a *App) renderChat() string {
 		status = styleStatusBar.Render(streamStatus + "  [Esc] Cancel")
 	} else {
 		var statusParts []string
+
+		// Scroll indicator
+		if a.state.chatScrollOffset > 0 {
+			statusParts = append(statusParts, fmt.Sprintf("[scroll: %d]", a.state.chatScrollOffset))
+		}
+
 		if a.state.lastStats != "" && len(a.state.chatHistory) > 0 {
 			statusParts = append(statusParts, a.buildIdleStats())
 		}
-		statusParts = append(statusParts, "[Enter] Send  [n] New chat  [Esc] Back")
+		statusParts = append(statusParts, "[j/k] Scroll  [n] New  [Esc] Back")
 		status = styleStatusBar.Render(strings.Join(statusParts, "  "))
 	}
 	footer.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, status))
 
 	// === COMBINE WITH PROPER SPACING ===
 	headerContent := header.String()
-	messagesContent := strings.Join(messageLines, "\n")
+	messagesContent := strings.Join(visibleLines, "\n")
 	footerContent := footer.String()
 
 	// Calculate padding to push footer to bottom
-	usedLines := headerHeight + len(messageLines) + inputHeight
+	displayedLines := len(visibleLines)
+	usedLines := headerHeight + displayedLines + inputHeight
 	padding := a.height - usedLines
 	if padding < 0 {
 		padding = 0
@@ -221,7 +259,6 @@ func (a *App) buildStreamStatus() string {
 
 	elapsed := time.Since(a.state.streamStart).Seconds()
 
-	// Spinner + Phase
 	spinner := spinnerFrames[a.state.spinnerFrame%len(spinnerFrames)]
 	switch a.state.streamPhase {
 	case "connecting":
@@ -245,7 +282,6 @@ func (a *App) buildStreamStatus() string {
 		parts = append(parts, "...")
 	}
 
-	// Context usage
 	if a.state.contextLimit > 0 {
 		pct := float64(a.state.contextUsed) / float64(a.state.contextLimit) * 100
 		parts = append(parts, fmt.Sprintf("%.1fk/%.0fk ctx (%.0f%%)",
@@ -254,12 +290,10 @@ func (a *App) buildStreamStatus() string {
 			pct))
 	}
 
-	// Elapsed time
 	if elapsed > 0 {
 		parts = append(parts, fmt.Sprintf("%.1fs", elapsed))
 	}
 
-	// Skill indicator
 	if a.state.chatSkill != nil {
 		parts = append(parts, fmt.Sprintf("[%s]", a.state.chatSkill.Name))
 	}
