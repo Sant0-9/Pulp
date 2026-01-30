@@ -7,6 +7,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (a *App) renderDocument() string {
 	if a.state.document == nil {
 		return a.renderWelcome()
@@ -73,6 +80,25 @@ func (a *App) renderDocument() string {
 		Render(a.state.input.View())
 	b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, inputBox))
 	b.WriteString("\n\n")
+
+	// Show parsing status or parsed intent
+	if a.state.parsingIntent {
+		parsingLabel := styleSubtitle.Render("Parsing instruction...")
+		b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, parsingLabel))
+		b.WriteString("\n\n")
+	} else if a.state.currentIntent != nil {
+		i := a.state.currentIntent
+		intentInfo := fmt.Sprintf(
+			"Parsed: action=%s, tone=%s, audience=%s, format=%s",
+			i.Action, i.Tone, i.Audience, i.Format,
+		)
+		intentBox := styleBox.Copy().
+			Width(min(70, a.width-4)).
+			Foreground(colorSecondary).
+			Render(intentInfo)
+		b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, intentBox))
+		b.WriteString("\n\n")
+	}
 
 	// Status bar
 	statusBar := styleStatusBar.Render("[Enter] Submit  [n] New document  [Esc] Quit")

@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/sant0-9/pulp/internal/config"
 	"github.com/sant0-9/pulp/internal/converter"
+	"github.com/sant0-9/pulp/internal/intent"
 	"github.com/sant0-9/pulp/internal/llm"
 )
 
@@ -43,6 +44,10 @@ type state struct {
 	localProvider llm.Provider
 	providerReady bool
 	providerError error
+
+	// Intent
+	currentIntent *intent.Intent
+	parsingIntent bool
 }
 
 type message struct {

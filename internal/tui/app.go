@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sant0-9/pulp/internal/config"
 	"github.com/sant0-9/pulp/internal/converter"
+	"github.com/sant0-9/pulp/internal/intent"
 	"github.com/sant0-9/pulp/internal/llm"
 )
 
@@ -131,6 +132,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.state.loadingDoc = false
 		a.state.docError = msg.error
 		return a, nil
+
+	case intentParsedMsg:
+		a.state.parsingIntent = false
+		a.state.currentIntent = msg.intent
+		// For now, just show what we parsed (processing comes in Phase 6)
+		return a, nil
 	}
 
 	// Update text inputs based on view
@@ -166,6 +173,14 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, keys.Enter):
 		if a.view == viewWelcome && a.state.providerReady {
 			return a.handleInput()
+		}
+		if a.view == viewDocument && a.state.providerReady {
+			instruction := strings.TrimSpace(a.state.input.Value())
+			if instruction != "" {
+				a.state.parsingIntent = true
+				a.state.input.Reset()
+				return a.parseIntent(instruction)
+			}
 		}
 	}
 
@@ -240,6 +255,21 @@ func (a *App) loadDocument(path string) tea.Cmd {
 	}
 }
 
+func (a *App) parseIntent(instruction string) tea.Cmd {
+	return func() tea.Msg {
+		parser := intent.NewParser(a.state.provider, a.state.config.Model)
+		ctx := context.Background()
+
+		parsed, err := parser.Parse(ctx, instruction)
+		if err != nil {
+			// Use defaults on error
+			parsed = intent.DefaultIntent(instruction)
+		}
+
+		return intentParsedMsg{parsed}
+	}
+}
+
 func (a *App) handleSetupKey(msg tea.KeyMsg) tea.Cmd {
 	switch a.state.setupStep {
 	case 0: // Provider selection
@@ -295,6 +325,9 @@ type documentLoadedMsg struct {
 	doc *converter.Document
 }
 type documentErrorMsg struct{ error }
+type intentParsedMsg struct {
+	intent *intent.Intent
+}
 
 func (a *App) View() string {
 	if a.quitting {
