@@ -1,0 +1,87 @@
+project_name: pulp
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: pulp
+    main: ./cmd/pulp
+    binary: pulp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - python/*
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+brews:
+  - name: pulp
+    repository:
+      owner: sant0-9
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/sant0-9/pulp
+    description: "Document intelligence in your terminal"
+    license: MIT
+    install: |
+      bin.install "pulp"
+      (share/"pulp"/"python").install Dir["python/*"]
+    test: |
+      system "#{bin}/pulp", "--version"
+
+nfpms:
+  - id: packages
+    package_name: pulp
+    vendor: Sant0-9
+    homepage: https://github.com/sant0-9/pulp
+    maintainer: Sant0-9
+    description: "Document intelligence in your terminal"
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    contents:
+      - src: python/*
+        dst: /usr/share/pulp/python/
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: sant0-9
+    name: pulp
+  draft: false
+  prerelease: auto

@@ -20,14 +20,14 @@ func (a *App) renderProcessing() string {
 
 	// Document info
 	if a.state.document != nil {
-		docInfo := styleSubtitle.Render(a.state.document.Metadata.Title)
+		docInfo := styleSubtitle.Render(truncate(a.state.document.Metadata.Title, 60))
 		b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, docInfo))
 		b.WriteString("\n\n")
 	}
 
 	// Intent info
 	if a.state.currentIntent != nil {
-		intentInfo := styleSubtitle.Render(fmt.Sprintf("> %s", a.state.currentIntent.RawPrompt))
+		intentInfo := styleSubtitle.Render("> " + truncate(a.state.currentIntent.RawPrompt, 55))
 		b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, intentInfo))
 		b.WriteString("\n\n")
 	}
@@ -85,7 +85,7 @@ func (a *App) renderProcessing() string {
 
 	// Message
 	if a.state.pipelineProgress != nil && a.state.pipelineProgress.Message != "" {
-		msg := styleSubtitle.Render(a.state.pipelineProgress.Message)
+		msg := styleSubtitle.Render(truncate(a.state.pipelineProgress.Message, 60))
 		b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, msg))
 	}
 

@@ -7,6 +7,7 @@ import (
 	"github.com/sant0-9/pulp/internal/intent"
 	"github.com/sant0-9/pulp/internal/llm"
 	"github.com/sant0-9/pulp/internal/pipeline"
+	"github.com/sant0-9/pulp/internal/prompts"
 )
 
 // Writer generates final output from aggregated content
@@ -77,10 +78,9 @@ func (w *Writer) buildMessages(req *WriteRequest) []llm.Message {
 
 	// Build system prompt with skill instructions if present
 	if req.Intent.HasSkill() {
-		systemPrompt := buildSkillSystemPrompt(req.Intent.MatchedSkill.Body)
 		messages = append(messages, llm.Message{
 			Role:    "system",
-			Content: systemPrompt,
+			Content: prompts.BuildSkillPrompt(req.Intent.MatchedSkill.Body),
 		})
 	}
 
@@ -110,8 +110,4 @@ func (w *Writer) buildMessages(req *WriteRequest) []llm.Message {
 	}
 
 	return messages
-}
-
-func buildSkillSystemPrompt(skillBody string) string {
-	return fmt.Sprintf("Follow these instructions when processing the document:\n\n%s", skillBody)
 }

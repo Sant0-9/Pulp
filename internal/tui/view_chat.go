@@ -21,51 +21,60 @@ var loadingMessages = []string{
 }
 
 // Spinner frames for animation
-var spinnerFrames = []string{"*", "*", "*", "*"}
+var spinnerFrames = []string{".", "o", "O", "o"}
 
 func (a *App) renderChat() string {
-	boxWidth := min(70, a.width-4)
-	leftPad := (a.width - boxWidth) / 2
-	if leftPad < 2 {
-		leftPad = 2
+	// Use full width with padding
+	contentWidth := a.width - 4
+	if contentWidth < 40 {
+		contentWidth = 40
 	}
-	indent := strings.Repeat(" ", leftPad)
+	leftPad := 2
 
-	// Calculate fixed heights
-	headerHeight := 3 // Title + Model + blank line
-	inputHeight := 4  // Input box + status bar
-	if a.state.chatStreaming {
-		inputHeight = 2 // Just status bar when streaming
-	}
+	// Fixed footer height: input line + status line = 2
+	footerHeight := 2
+
+	// Header is minimal: just 1 line for context info
+	headerHeight := 1
 
 	// Available height for messages
-	availableHeight := a.height - headerHeight - inputHeight
-	if availableHeight < 5 {
-		availableHeight = 5
+	availableHeight := a.height - headerHeight - footerHeight - 1 // -1 for spacing
+	if availableHeight < 3 {
+		availableHeight = 3
 	}
 
-	// === BUILD HEADER ===
-	var header strings.Builder
-	titleText := "Chat"
+	// === HEADER (minimal, like Claude Code) ===
+	var headerParts []string
+	modelName := a.getModelDisplayName()
+	if modelName != "" {
+		headerParts = append(headerParts, modelName)
+	}
 	if a.state.chatSkill != nil {
-		titleText = "Chat [" + a.state.chatSkill.Name + "]"
+		headerParts = append(headerParts, fmt.Sprintf("[%s]", a.state.chatSkill.Name))
 	}
-	title := lipgloss.NewStyle().
-		Foreground(colorPrimary).
-		Bold(true).
-		Render(titleText)
-	header.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, title))
-	header.WriteString("\n")
+	if a.state.contextLimit > 0 && a.state.contextUsed > 0 {
+		pct := float64(a.state.contextUsed) / float64(a.state.contextLimit) * 100
+		headerParts = append(headerParts, fmt.Sprintf("%.1fk/%.0fk ctx (%.0f%%)",
+			float64(a.state.contextUsed)/1000,
+			float64(a.state.contextLimit)/1000,
+			pct))
+	}
 
-	modelInfo := a.getModelDisplayName()
-	modelLine := lipgloss.NewStyle().
+	header := lipgloss.NewStyle().
 		Foreground(colorMuted).
-		Render(modelInfo)
-	header.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, modelLine))
-	header.WriteString("\n\n")
+		Render(strings.Join(headerParts, "  "))
 
-	// === BUILD ALL MESSAGE LINES ===
+	// === BUILD MESSAGE LINES ===
 	var messageLines []string
+	indent := strings.Repeat(" ", leftPad)
+
+	// Show error if any
+	if a.state.docError != nil {
+		errLine := lipgloss.NewStyle().
+			Foreground(colorError).
+			Render("Error: " + a.state.docError.Error())
+		messageLines = append(messageLines, indent+errLine, "")
+	}
 
 	for i, msg := range a.state.chatHistory {
 		// Skip the last assistant message if streaming (shown separately)
@@ -74,7 +83,8 @@ func (a *App) renderChat() string {
 		}
 
 		if msg.role == "user" {
-			content := wrapText(msg.content, boxWidth-4)
+			// User messages with ">" prefix
+			content := wrapText(msg.content, contentWidth-4)
 			lines := strings.Split(content, "\n")
 			for j, line := range lines {
 				prefix := "> "
@@ -83,11 +93,13 @@ func (a *App) renderChat() string {
 				}
 				styled := lipgloss.NewStyle().
 					Foreground(colorSecondary).
+					Bold(true).
 					Render(prefix + line)
 				messageLines = append(messageLines, indent+styled)
 			}
 		} else {
-			content := wrapText(msg.content, boxWidth-4)
+			// Assistant messages
+			content := wrapText(msg.content, contentWidth-4)
 			lines := strings.Split(content, "\n")
 			for _, line := range lines {
 				styled := lipgloss.NewStyle().
@@ -102,23 +114,30 @@ func (a *App) renderChat() string {
 	// Add streaming content
 	if a.state.chatStreaming {
 		if a.state.chatResult == "" {
-			// Show loading message
+			// Show animated loading message
 			spinner := spinnerFrames[a.state.spinnerFrame%len(spinnerFrames)]
 			elapsed := time.Since(a.state.streamStart).Seconds()
 			msgIdx := int(elapsed*2) % len(loadingMessages)
 			loadingText := lipgloss.NewStyle().
 				Foreground(colorPrimary).
-				Render(fmt.Sprintf("%s %s", spinner, loadingMessages[msgIdx]))
+				Render(fmt.Sprintf("  %s %s", spinner, loadingMessages[msgIdx]))
 			messageLines = append(messageLines, indent+loadingText)
 		} else {
 			// Show streaming response
-			content := wrapText(a.state.chatResult, boxWidth-4)
+			content := wrapText(a.state.chatResult, contentWidth-4)
 			lines := strings.Split(content, "\n")
 			for _, line := range lines {
 				styled := lipgloss.NewStyle().
 					Foreground(colorWhite).
 					Render("  " + line)
 				messageLines = append(messageLines, indent+styled)
+			}
+			// Show cursor at end during streaming
+			cursor := lipgloss.NewStyle().
+				Foreground(colorPrimary).
+				Render("_")
+			if len(messageLines) > 0 {
+				messageLines[len(messageLines)-1] += cursor
 			}
 		}
 	}
@@ -159,50 +178,49 @@ func (a *App) renderChat() string {
 		visibleLines = messageLines[startIdx:endIdx]
 	}
 
-	// === BUILD INPUT/STATUS ===
-	var footer strings.Builder
+	// === BUILD FOOTER ===
+	var footerLines []string
 
-	if !a.state.chatStreaming {
-		if a.state.chatSkill != nil {
-			a.state.input.Placeholder = "Chat with " + a.state.chatSkill.Name + " skill..."
-		} else {
-			a.state.input.Placeholder = "Continue the conversation..."
-		}
-		inputBox := styleBox.Copy().
-			Width(boxWidth).
-			BorderForeground(colorMuted).
-			Render(a.state.input.View())
-		footer.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, inputBox))
-		footer.WriteString("\n")
-	}
+	// Input prompt (always visible, but shows streaming indicator when busy)
+	prompt := lipgloss.NewStyle().
+		Foreground(colorSecondary).
+		Bold(true).
+		Render("> ")
 
-	// Status bar with scroll indicator
-	var status string
 	if a.state.chatStreaming {
-		streamStatus := a.buildStreamStatus()
-		a.state.lastStats = streamStatus
-		status = styleStatusBar.Render(streamStatus + "  [Esc] Cancel")
+		// Show streaming indicator instead of input
+		spinner := spinnerFrames[a.state.spinnerFrame%len(spinnerFrames)]
+		streamingText := lipgloss.NewStyle().
+			Foreground(colorMuted).
+			Italic(true).
+			Render(fmt.Sprintf("%s Streaming...", spinner))
+		footerLines = append(footerLines, indent+prompt+streamingText)
 	} else {
-		var statusParts []string
-
-		// Scroll indicator
-		if a.state.chatScrollOffset > 0 {
-			statusParts = append(statusParts, fmt.Sprintf("[scroll: %d]", a.state.chatScrollOffset))
-		}
-
-		if a.state.lastStats != "" && len(a.state.chatHistory) > 0 {
-			statusParts = append(statusParts, a.buildIdleStats())
-		}
-		statusParts = append(statusParts, "[j/k] Scroll  [n] New  [Esc] Back")
-		status = styleStatusBar.Render(strings.Join(statusParts, "  "))
+		inputStyle := lipgloss.NewStyle().
+			Foreground(colorWhite)
+		inputLine := indent + prompt + inputStyle.Render(a.state.input.View())
+		footerLines = append(footerLines, inputLine)
 	}
-	footer.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, status))
 
-	// === COMBINE WITH FIXED LAYOUT ===
-	headerContent := header.String()
-	footerContent := footer.String()
+	// Status bar
+	var statusParts []string
+	if a.state.chatStreaming {
+		statusParts = append(statusParts, a.buildStreamStatus())
+		statusParts = append(statusParts, "[Esc] Cancel")
+	} else {
+		if a.state.chatScrollOffset > 0 {
+			statusParts = append(statusParts, fmt.Sprintf("scroll: %d", a.state.chatScrollOffset))
+		}
+		statusParts = append(statusParts, "[Ctrl+U/D] Scroll  [Esc] Back")
+	}
 
-	// Build message area with exact height
+	statusLine := lipgloss.NewStyle().
+		Foreground(colorMuted).
+		Render(indent + strings.Join(statusParts, "  "))
+	footerLines = append(footerLines, statusLine)
+
+	// === COMBINE LAYOUT ===
+	// Build message area
 	var messageArea strings.Builder
 	for i, line := range visibleLines {
 		messageArea.WriteString(line)
@@ -211,18 +229,30 @@ func (a *App) renderChat() string {
 		}
 	}
 
-	// Pad message area to fill available height
+	// Pad message area to fill available height (push footer to bottom)
 	displayedLines := len(visibleLines)
 	messagePadding := availableHeight - displayedLines
-	if messagePadding > 0 {
-		if displayedLines > 0 {
+	for i := 0; i < messagePadding; i++ {
+		if displayedLines > 0 || i > 0 {
 			messageArea.WriteString("\n")
 		}
-		messageArea.WriteString(strings.Repeat("\n", messagePadding-1))
 	}
 
-	// Combine: header + messages (fixed height) + footer
-	return headerContent + messageArea.String() + "\n" + footerContent
+	// Combine all parts
+	var output strings.Builder
+
+	// Header
+	output.WriteString(indent + header)
+	output.WriteString("\n")
+
+	// Messages (fills available space)
+	output.WriteString(messageArea.String())
+	output.WriteString("\n")
+
+	// Footer (fixed at bottom)
+	output.WriteString(strings.Join(footerLines, "\n"))
+
+	return output.String()
 }
 
 // wrapText wraps text to fit within maxWidth, preserving words
@@ -230,26 +260,36 @@ func wrapText(text string, maxWidth int) string {
 	if maxWidth <= 0 {
 		maxWidth = 60
 	}
-	if len(text) <= maxWidth {
-		return text
-	}
 
 	var result strings.Builder
-	words := strings.Fields(text)
-	lineLen := 0
+	lines := strings.Split(text, "\n")
 
-	for i, word := range words {
-		if i > 0 {
-			if lineLen+1+len(word) > maxWidth {
-				result.WriteString("\n")
-				lineLen = 0
-			} else {
-				result.WriteString(" ")
-				lineLen++
-			}
+	for lineIdx, line := range lines {
+		if lineIdx > 0 {
+			result.WriteString("\n")
 		}
-		result.WriteString(word)
-		lineLen += len(word)
+
+		if len(line) <= maxWidth {
+			result.WriteString(line)
+			continue
+		}
+
+		words := strings.Fields(line)
+		lineLen := 0
+
+		for i, word := range words {
+			if i > 0 {
+				if lineLen+1+len(word) > maxWidth {
+					result.WriteString("\n")
+					lineLen = 0
+				} else {
+					result.WriteString(" ")
+					lineLen++
+				}
+			}
+			result.WriteString(word)
+			lineLen += len(word)
+		}
 	}
 
 	return result.String()
@@ -281,12 +321,12 @@ func (a *App) buildStreamStatus() string {
 			parts = append(parts, fmt.Sprintf("%d tokens", a.state.streamTokens))
 		}
 	default:
-		parts = append(parts, "...")
+		parts = append(parts, spinner)
 	}
 
 	if a.state.contextLimit > 0 {
 		pct := float64(a.state.contextUsed) / float64(a.state.contextLimit) * 100
-		parts = append(parts, fmt.Sprintf("%.1fk/%.0fk ctx (%.0f%%)",
+		parts = append(parts, fmt.Sprintf("%.1fk/%.0fk (%.0f%%)",
 			float64(a.state.contextUsed)/1000,
 			float64(a.state.contextLimit)/1000,
 			pct))
@@ -294,10 +334,6 @@ func (a *App) buildStreamStatus() string {
 
 	if elapsed > 0 {
 		parts = append(parts, fmt.Sprintf("%.1fs", elapsed))
-	}
-
-	if a.state.chatSkill != nil {
-		parts = append(parts, fmt.Sprintf("[%s]", a.state.chatSkill.Name))
 	}
 
 	return strings.Join(parts, "  ")

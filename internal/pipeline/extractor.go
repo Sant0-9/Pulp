@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sant0-9/pulp/internal/llm"
+	"github.com/sant0-9/pulp/internal/prompts"
 )
 
 // Extraction contains extracted information from a chunk
@@ -32,17 +33,6 @@ func NewExtractor(provider llm.Provider, model string) *Extractor {
 	}
 }
 
-const extractionPrompt = `Extract key information from this text. Return JSON only:
-{
-  "key_points": ["point 1", "point 2", "point 3"],
-  "entities": ["names", "organizations", "dates", "numbers mentioned"],
-  "facts": ["specific factual claims"],
-  "summary": "one sentence summary"
-}
-
-Be specific. Include names, numbers, dates. No generic statements.
-Return ONLY valid JSON.`
-
 func (e *Extractor) Extract(ctx context.Context, chunk Chunk) (*Extraction, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -50,7 +40,7 @@ func (e *Extractor) Extract(ctx context.Context, chunk Chunk) (*Extraction, erro
 	req := &llm.CompletionRequest{
 		Model: e.model,
 		Messages: []llm.Message{
-			{Role: "system", Content: extractionPrompt},
+			{Role: "system", Content: prompts.Extraction},
 			{Role: "user", Content: chunk.Content},
 		},
 		MaxTokens:   500,

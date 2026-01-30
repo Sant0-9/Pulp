@@ -2,6 +2,17 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
+// truncate shortens text to maxLen, adding "..." if truncated
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
+
 var (
 	// Colors
 	colorPrimary   = lipgloss.Color("#7C3AED")

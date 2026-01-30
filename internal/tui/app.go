@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -439,7 +440,8 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	// Handle 'n' for new document/chat
-	if msg.String() == "n" {
+	// Only trigger when input is not focused or is empty (prevents accidental nav while typing)
+	if msg.String() == "n" && !a.state.input.Focused() {
 		if a.view == viewDocument || a.view == viewResult {
 			a.state.document = nil
 			a.state.documentPath = ""
@@ -494,8 +496,8 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
-	// Chat view scroll handling
-	if a.view == viewChat {
+	// Chat view scroll handling (only when not typing)
+	if a.view == viewChat && !a.state.input.Focused() {
 		switch msg.String() {
 		case "up", "k":
 			a.state.chatScrollOffset += 3
@@ -508,6 +510,21 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.state.chatAutoScroll = true
 			}
 			return nil
+		case "g":
+			// Scroll to top - will be clamped in render
+			a.state.chatScrollOffset = 99999
+			a.state.chatAutoScroll = false
+			return nil
+		case "G":
+			a.state.chatScrollOffset = 0
+			a.state.chatAutoScroll = true
+			return nil
+		}
+	}
+
+	// Chat view scroll with modifiers (works even when typing)
+	if a.view == viewChat {
+		switch msg.String() {
 		case "pgup", "ctrl+u":
 			a.state.chatScrollOffset += 10
 			a.state.chatAutoScroll = false
@@ -519,12 +536,11 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.state.chatAutoScroll = true
 			}
 			return nil
-		case "home", "g":
-			// Scroll to top - will be clamped in render
+		case "home":
 			a.state.chatScrollOffset = 99999
 			a.state.chatAutoScroll = false
 			return nil
-		case "end", "G":
+		case "end":
 			a.state.chatScrollOffset = 0
 			a.state.chatAutoScroll = true
 			return nil
@@ -598,9 +614,8 @@ func (a *App) handleInput() tea.Cmd {
 		return nil
 	}
 
-	// Strip quotes from file paths (common when dragging/dropping)
-	input = strings.Trim(input, "'\"")
-	input = strings.TrimSpace(input)
+	// Clean up drag-and-drop paths
+	input = cleanFilePath(input)
 
 	// Handle slash commands
 	if strings.HasPrefix(input, "/") {
@@ -742,6 +757,41 @@ func looksLikeFilePath(input string) bool {
 	return false
 }
 
+// cleanFilePath handles various drag-and-drop path formats
+func cleanFilePath(input string) string {
+	input = strings.TrimSpace(input)
+
+	// Strip quotes (common when dragging/dropping)
+	input = strings.Trim(input, "'\"")
+	input = strings.TrimSpace(input)
+
+	// Handle file:// URLs (common from file managers)
+	if strings.HasPrefix(input, "file://") {
+		// Parse as URL to handle encoding
+		if u, err := url.Parse(input); err == nil {
+			// URL.Path gives us the decoded path
+			input = u.Path
+		} else {
+			// Fallback: just strip the prefix
+			input = strings.TrimPrefix(input, "file://")
+		}
+	}
+
+	// URL decode any remaining encoded characters (like %20 for spaces)
+	if decoded, err := url.PathUnescape(input); err == nil {
+		input = decoded
+	}
+
+	// Expand ~ to home directory
+	if strings.HasPrefix(input, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			input = filepath.Join(home, input[2:])
+		}
+	}
+
+	return strings.TrimSpace(input)
+}
+
 func (a *App) loadDocument(path string) tea.Cmd {
 	return func() tea.Msg {
 		converter, err := converter.NewConverter()
@@ -844,6 +894,18 @@ func (a *App) startWriter() tea.Cmd {
 
 		// Stream chunks via program.Send for real-time updates
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					if a.program != nil {
+						a.program.Send(streamErrorMsg{fmt.Errorf("stream panic: %v", r)})
+					}
+				}
+			}()
+
+			if a.program == nil {
+				return
+			}
+
 			for event := range stream {
 				if event.Error != nil {
 					a.program.Send(streamErrorMsg{event.Error})
@@ -921,6 +983,18 @@ func (a *App) startChat(userMessage string) tea.Cmd {
 
 		// Stream chunks via program.Send
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					if a.program != nil {
+						a.program.Send(chatErrorMsg{fmt.Errorf("stream panic: %v", r)})
+					}
+				}
+			}()
+
+			if a.program == nil {
+				return
+			}
+
 			for event := range stream {
 				if event.Error != nil {
 					a.program.Send(chatErrorMsg{event.Error})

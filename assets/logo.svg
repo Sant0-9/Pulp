@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 200">
+  <!-- Terminal window -->
+  <rect width="480" height="200" fill="#1E1E1E" rx="10"/>
+
+  <!-- Window bar -->
+  <rect y="0" width="480" height="32" fill="#323232" rx="10 10 0 0"/>
+
+  <!-- Window controls -->
+  <circle cx="20" cy="16" r="6" fill="#FF5F57"/>
+  <circle cx="40" cy="16" r="6" fill="#FFBD2E"/>
+  <circle cx="60" cy="16" r="6" fill="#28C840"/>
+
+  <!-- Title -->
+  <text x="240" y="20" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#8B8B8B" text-anchor="middle">pulp</text>
+
+  <!-- ASCII Art PULP using standard characters -->
+  <text font-family="'Menlo', 'Monaco', 'Courier New', monospace" font-size="14" fill="#A855F7" xml:space="preserve">
+    <tspan x="60" y="65">  _____    _    _   _       _____  </tspan>
+    <tspan x="60" y="82"> |  __ \  | |  | | | |     |  __ \ </tspan>
+    <tspan x="60" y="99"> | |__) | | |  | | | |     | |__) |</tspan>
+    <tspan x="60" y="116"> |  ___/  | |  | | | |     |  ___/ </tspan>
+    <tspan x="60" y="133"> | |      | |__| | | |____ | |     </tspan>
+    <tspan x="60" y="150"> |_|       \____/  |______||_|     </tspan>
+  </text>
+
+  <!-- Tagline -->
+  <text x="60" y="175" font-family="'Menlo', 'Monaco', 'Courier New', monospace" font-size="12" fill="#6B7280">
+    Document Intelligence
+  </text>
+
+  <!-- Cursor -->
+  <rect x="218" y="165" width="8" height="14" fill="#22D3EE">
+    <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+  </rect>
+</svg>

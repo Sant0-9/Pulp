@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -12,14 +11,14 @@ func (a *App) renderResult() string {
 
 	// Document info (small)
 	if a.state.document != nil {
-		docInfo := styleSubtitle.Render(a.state.document.Metadata.Title)
+		docInfo := styleSubtitle.Render(truncate(a.state.document.Metadata.Title, 60))
 		b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, docInfo))
 		b.WriteString("\n")
 	}
 
 	// Show what was asked (user message)
 	if a.state.currentIntent != nil {
-		asked := styleSubtitle.Render(fmt.Sprintf("> %s", a.state.currentIntent.RawPrompt))
+		asked := styleSubtitle.Render("> " + truncate(a.state.currentIntent.RawPrompt, 55))
 		b.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, asked))
 		b.WriteString("\n\n")
 	}
