@@ -16,6 +16,7 @@ import (
 	"github.com/sant0-9/pulp/internal/intent"
 	"github.com/sant0-9/pulp/internal/llm"
 	"github.com/sant0-9/pulp/internal/pipeline"
+	"github.com/sant0-9/pulp/internal/prompts"
 	"github.com/sant0-9/pulp/internal/skill"
 	"github.com/sant0-9/pulp/internal/writer"
 )
@@ -32,6 +33,7 @@ const (
 	viewHelp
 	viewSkills
 	viewNewSkill
+	viewChat
 )
 
 type App struct {
@@ -217,6 +219,43 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.state.generatingSkill = false
 		a.state.newSkillError = msg.error
 		return a, nil
+
+	case chatChunkMsg:
+		// First chunk = streaming started
+		if a.state.streamPhase == "connecting" {
+			a.state.streamPhase = "streaming"
+		}
+		a.state.chatResult += msg.chunk
+		a.state.streamTokens += estimateTokens(msg.chunk)
+		a.state.contextUsed += estimateTokens(msg.chunk)
+		return a, tickCmd() // Keep ticking for animation
+
+	case chatDoneMsg:
+		a.state.chatStreaming = false
+		a.state.streamPhase = "complete"
+		a.state.chatHistory = append(a.state.chatHistory, message{
+			role:    "assistant",
+			content: a.state.chatResult,
+		})
+		a.state.input.Focus()
+		return a, textinput.Blink
+
+	case chatErrorMsg:
+		a.state.chatStreaming = false
+		a.state.docError = msg.error
+		return a, nil
+
+	case tickMsg:
+		// Animate spinner during streaming
+		if a.state.chatStreaming || a.state.streaming {
+			a.state.spinnerFrame++
+			// Rotate loading message periodically
+			if a.state.spinnerFrame%10 == 0 {
+				a.state.loadingMessage = loadingMessages[a.state.spinnerFrame/10%len(loadingMessages)]
+			}
+			return a, tickCmd()
+		}
+		return a, nil
 	}
 
 	// Update text inputs based on view
@@ -232,7 +271,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.state.apiKeyInput, cmd = a.state.apiKeyInput.Update(msg)
 		cmds = append(cmds, cmd)
-	} else if a.view == viewWelcome || a.view == viewDocument || a.view == viewResult || a.view == viewNewSkill {
+	} else if a.view == viewWelcome || a.view == viewDocument || a.view == viewResult || a.view == viewNewSkill || a.view == viewChat {
 		// Skip input update if palette is handling navigation keys
 		skipInput := false
 		if a.state.cmdPaletteActive && a.view == viewWelcome {
@@ -324,6 +363,17 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.state.input.Placeholder = "/help for commands, or drop a file..."
 			return nil
 		}
+		if a.view == viewChat {
+			if a.state.chatStreaming {
+				// TODO: cancel streaming
+				return nil
+			}
+			a.state.chatSkill = nil // Clear active skill
+			a.view = viewWelcome
+			a.state.input.Reset()
+			a.state.input.Placeholder = "/help for commands, or drop a file..."
+			return nil
+		}
 		if a.view == viewSetup && a.state.setupStep == 1 {
 			// Go back to provider selection
 			a.state.setupStep = 0
@@ -370,9 +420,24 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 				return a.generateSkill(desc)
 			}
 		}
+		// Handle chat view follow-up
+		if a.view == viewChat && !a.state.chatStreaming {
+			userMsg := strings.TrimSpace(a.state.input.Value())
+			if userMsg != "" {
+				a.state.chatHistory = append(a.state.chatHistory, message{
+					role:    "user",
+					content: userMsg,
+				})
+				a.state.chatStreaming = true
+				a.state.chatResult = ""
+				a.initStreamStats()
+				a.state.input.Reset()
+				return tea.Batch(a.startChat(userMsg), tickCmd())
+			}
+		}
 	}
 
-	// Handle 'n' for new document
+	// Handle 'n' for new document/chat
 	if msg.String() == "n" {
 		if a.view == viewDocument || a.view == viewResult {
 			a.state.document = nil
@@ -383,6 +448,18 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.state.result = ""
 			a.state.history = nil      // Clear history
 			a.state.isFollowUp = false // Reset flag
+			a.state.input.Reset()
+			a.state.input.Placeholder = "/help for commands, or drop a file..."
+			a.view = viewWelcome
+			return nil
+		}
+		if a.view == viewChat && !a.state.chatStreaming {
+			a.state.chatHistory = nil
+			a.state.chatResult = ""
+			a.state.chatSkill = nil // Clear active skill
+			a.state.lastStats = ""  // Clear stats
+			a.state.contextUsed = 0
+			a.state.streamTokens = 0
 			a.state.input.Reset()
 			a.state.input.Placeholder = "/help for commands, or drop a file..."
 			a.view = viewWelcome
@@ -483,6 +560,10 @@ func (a *App) handleInput() tea.Cmd {
 		return nil
 	}
 
+	// Strip quotes from file paths (common when dragging/dropping)
+	input = strings.Trim(input, "'\"")
+	input = strings.TrimSpace(input)
+
 	// Handle slash commands
 	if strings.HasPrefix(input, "/") {
 		cmd := strings.ToLower(input)
@@ -517,13 +598,46 @@ func (a *App) handleInput() tea.Cmd {
 			a.quitting = true
 			return tea.Quit
 		default:
-			// Check if it's a skill command
-			skillName := strings.TrimPrefix(cmd, "/")
-			if a.state.skillIndex != nil && a.state.skillIndex.Get(skillName) != nil {
-				// TODO: Execute skill
-				a.state.input.Reset()
-				return nil
+			// Check if it's a skill command (with optional message)
+			// Format: /skill-name or /skill-name message to chat with skill
+			parts := strings.SplitN(strings.TrimPrefix(input, "/"), " ", 2)
+			skillName := strings.ToLower(parts[0])
+
+			if a.state.skillIndex != nil {
+				if meta := a.state.skillIndex.Get(skillName); meta != nil {
+					// Load full skill
+					fullSkill, err := skill.LoadFull(meta)
+					if err != nil {
+						a.state.docError = fmt.Errorf("failed to load skill: %v", err)
+						a.state.input.Reset()
+						return nil
+					}
+
+					a.state.chatSkill = fullSkill
+					a.state.input.Reset()
+
+					// If message provided, start chat immediately
+					if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
+						userMsg := strings.TrimSpace(parts[1])
+						a.state.chatHistory = append(a.state.chatHistory, message{
+							role:    "user",
+							content: userMsg,
+						})
+						a.state.chatStreaming = true
+						a.state.chatResult = ""
+						a.state.docError = nil
+						a.initStreamStats()
+						a.view = viewChat
+						return tea.Batch(a.startChat(userMsg), tickCmd())
+					}
+
+					// Just activate skill, go to chat view
+					a.view = viewChat
+					a.state.input.Placeholder = fmt.Sprintf("Chat with %s skill...", fullSkill.Name)
+					return nil
+				}
 			}
+
 			// Check if it looks like an absolute file path (has more path separators)
 			if strings.Count(input, "/") > 1 || strings.Contains(input, ".") {
 				// Treat as file path
@@ -538,9 +652,18 @@ func (a *App) handleInput() tea.Cmd {
 
 	// Check if input looks like a file path
 	if !looksLikeFilePath(input) {
-		a.state.docError = fmt.Errorf("drop a file path to process, or use /help for commands")
+		// Start general chat mode
+		a.state.chatHistory = append(a.state.chatHistory, message{
+			role:    "user",
+			content: input,
+		})
+		a.state.chatStreaming = true
+		a.state.chatResult = ""
+		a.state.docError = nil
+		a.initStreamStats()
 		a.state.input.Reset()
-		return nil
+		a.view = viewChat
+		return tea.Batch(a.startChat(input), tickCmd())
 	}
 
 	// Handle file path input
@@ -553,21 +676,24 @@ func (a *App) handleInput() tea.Cmd {
 
 // looksLikeFilePath checks if input appears to be a file path
 func looksLikeFilePath(input string) bool {
+	// Strip any remaining quotes for checking
+	check := strings.Trim(input, "'\"")
+
 	// Starts with path indicators
-	if strings.HasPrefix(input, "./") ||
-		strings.HasPrefix(input, "../") ||
-		strings.HasPrefix(input, "~/") ||
-		strings.HasPrefix(input, "/") {
+	if strings.HasPrefix(check, "./") ||
+		strings.HasPrefix(check, "../") ||
+		strings.HasPrefix(check, "~/") ||
+		strings.HasPrefix(check, "/") {
 		return true
 	}
 
 	// Contains path separator
-	if strings.Contains(input, "/") || strings.Contains(input, "\\") {
+	if strings.Contains(check, "/") || strings.Contains(check, "\\") {
 		return true
 	}
 
 	// Has common document extensions
-	lower := strings.ToLower(input)
+	lower := strings.ToLower(check)
 	extensions := []string{".pdf", ".txt", ".md", ".doc", ".docx", ".html", ".htm", ".rtf", ".odt"}
 	for _, ext := range extensions {
 		if strings.HasSuffix(lower, ext) {
@@ -724,6 +850,89 @@ func saveToFile(content, title string) tea.Cmd {
 
 		return saveMsg{path: path}
 	}
+}
+
+func (a *App) startChat(userMessage string) tea.Cmd {
+	return func() tea.Msg {
+		// Build system prompt
+		systemPrompt := a.buildChatSystemPrompt()
+
+		// Build messages
+		messages := []llm.Message{
+			{Role: "system", Content: systemPrompt},
+		}
+
+		// Add chat history
+		for _, m := range a.state.chatHistory {
+			messages = append(messages, llm.Message{
+				Role:    m.role,
+				Content: m.content,
+			})
+		}
+
+		ctx := context.Background()
+		stream, err := a.state.provider.Stream(ctx, &llm.CompletionRequest{
+			Model:       a.state.config.Model,
+			Messages:    messages,
+			MaxTokens:   2000,
+			Temperature: 0.7,
+		})
+		if err != nil {
+			return chatErrorMsg{err}
+		}
+
+		// Stream chunks via program.Send
+		go func() {
+			for event := range stream {
+				if event.Error != nil {
+					a.program.Send(chatErrorMsg{event.Error})
+					return
+				}
+				if event.Done {
+					a.program.Send(chatDoneMsg{})
+					return
+				}
+				a.program.Send(chatChunkMsg{event.Chunk})
+			}
+			a.program.Send(chatDoneMsg{})
+		}()
+
+		return nil
+	}
+}
+
+// buildChatSystemPrompt constructs the system prompt for chat mode
+func (a *App) buildChatSystemPrompt() string {
+	var skillName, skillBody string
+	if a.state.chatSkill != nil {
+		skillName = a.state.chatSkill.Name
+		skillBody = a.state.chatSkill.Body
+	}
+	return prompts.BuildChatPrompt(skillName, skillBody)
+}
+
+// initStreamStats initializes streaming statistics before starting a chat
+func (a *App) initStreamStats() {
+	a.state.streamStart = time.Now()
+	a.state.streamTokens = 0
+	a.state.streamPhase = "connecting"
+	a.state.spinnerFrame = 0
+	a.state.lastStats = "" // Clear previous stats
+
+	// Calculate input context (system prompt + history)
+	systemPrompt := a.buildChatSystemPrompt()
+	inputTokens := estimateTokens(systemPrompt)
+	for _, m := range a.state.chatHistory {
+		inputTokens += estimateTokens(m.content)
+	}
+	a.state.contextUsed = inputTokens
+
+	// Get context limit from model
+	model := ""
+	if a.state.config != nil {
+		model = a.state.config.Model
+	}
+	a.state.contextLimit = getContextLimit(model)
 }
 
 func (a *App) handleSetupKey(msg tea.KeyMsg) tea.Cmd {
@@ -928,6 +1137,21 @@ type skillGeneratedMsg struct {
 type skillGenerationErrorMsg struct {
 	error
 }
+type chatChunkMsg struct {
+	chunk string
+}
+type chatDoneMsg struct{}
+type chatErrorMsg struct {
+	error
+}
+type tickMsg time.Time
+
+// tickCmd returns a command that ticks for animations
+func tickCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
 
 func (a *App) View() string {
 	if a.quitting {
@@ -953,6 +1177,8 @@ func (a *App) View() string {
 		return a.renderSkills()
 	case viewNewSkill:
 		return a.renderNewSkill()
+	case viewChat:
+		return a.renderChat()
 	default:
 		return a.renderWelcome()
 	}

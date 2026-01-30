@@ -30,21 +30,21 @@ func (a *App) renderWelcome() string {
 	} else if a.state.docError != nil {
 		status = lipgloss.NewStyle().
 			Foreground(colorError).
-			Render(fmt.Sprintf("Error: %s", a.state.docError))
+			Render("Error: " + truncate(a.state.docError.Error(), 50))
 	} else if a.state.providerError != nil {
 		errorLine := lipgloss.NewStyle().
 			Foreground(colorError).
-			Render(fmt.Sprintf("Provider error: %s", a.state.providerError))
+			Render("Provider error: " + truncate(a.state.providerError.Error(), 40))
 		hint := lipgloss.NewStyle().
 			Foreground(colorMuted).
 			MarginTop(1).
 			Render("Press [s] for settings to fix")
 		status = lipgloss.JoinVertical(lipgloss.Center, errorLine, hint)
 	} else if a.state.providerReady {
-		providerName := a.state.config.Provider
+		modelName := a.getModelDisplayName()
 		status = lipgloss.NewStyle().
 			Foreground(colorSuccess).
-			Render(fmt.Sprintf("Connected to %s", providerName))
+			Render(fmt.Sprintf("Ready - %s", modelName))
 	} else {
 		status = styleSubtitle.Render("Connecting...")
 	}

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/sant0-9/pulp/internal/config"
 	"github.com/sant0-9/pulp/internal/converter"
@@ -72,6 +74,24 @@ type state struct {
 	settingsMode     string // "", "provider", "model", "apikey"
 	settingsSelected int
 	modelInput       textinput.Model
+
+	// Chat mode (no document)
+	chatHistory   []message
+	chatResult    string
+	chatStreaming bool
+	chatSkill     *skill.Skill // Active skill for chat mode
+
+	// Streaming stats
+	streamStart    time.Time
+	streamTokens   int
+	streamPhase    string // "connecting", "streaming", "complete"
+	contextUsed    int    // Estimated tokens used
+	contextLimit   int    // Model's context window
+
+	// Animation
+	spinnerFrame   int
+	loadingMessage string
+	lastStats      string // Persisted stats from last stream
 }
 
 type cmdItem struct {
