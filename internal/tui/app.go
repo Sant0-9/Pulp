@@ -12,6 +12,7 @@ import (
 	"github.com/sant0-9/pulp/internal/converter"
 	"github.com/sant0-9/pulp/internal/intent"
 	"github.com/sant0-9/pulp/internal/llm"
+	"github.com/sant0-9/pulp/internal/pipeline"
 )
 
 type view int
@@ -136,7 +137,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case intentParsedMsg:
 		a.state.parsingIntent = false
 		a.state.currentIntent = msg.intent
-		// For now, just show what we parsed (processing comes in Phase 6)
+		a.view = viewProcessing
+		return a, a.runPipeline()
+
+	case pipelineProgressMsg:
+		a.state.pipelineProgress = &msg.progress
+		return a, nil
+
+	case pipelineDoneMsg:
+		a.state.pipelineResult = msg.result
+		a.view = viewResult
+		return a, nil
+
+	case pipelineErrorMsg:
+		a.state.processingError = msg.error
+		a.view = viewDocument
 		return a, nil
 	}
 
@@ -270,6 +285,20 @@ func (a *App) parseIntent(instruction string) tea.Cmd {
 	}
 }
 
+func (a *App) runPipeline() tea.Cmd {
+	return func() tea.Msg {
+		pipe := pipeline.NewPipeline(a.state.provider, a.state.config.Model)
+
+		ctx := context.Background()
+		result, err := pipe.Process(ctx, a.state.document, a.state.currentIntent)
+		if err != nil {
+			return pipelineErrorMsg{err}
+		}
+
+		return pipelineDoneMsg{result}
+	}
+}
+
 func (a *App) handleSetupKey(msg tea.KeyMsg) tea.Cmd {
 	switch a.state.setupStep {
 	case 0: // Provider selection
@@ -328,6 +357,15 @@ type documentErrorMsg struct{ error }
 type intentParsedMsg struct {
 	intent *intent.Intent
 }
+type pipelineProgressMsg struct {
+	progress pipeline.Progress
+}
+type pipelineDoneMsg struct {
+	result *pipeline.Result
+}
+type pipelineErrorMsg struct {
+	error
+}
 
 func (a *App) View() string {
 	if a.quitting {
@@ -341,6 +379,10 @@ func (a *App) View() string {
 		return a.renderSetup()
 	case viewDocument:
 		return a.renderDocument()
+	case viewProcessing:
+		return a.renderProcessing()
+	case viewResult:
+		return a.renderResult()
 	case viewSettings:
 		return a.renderSettings()
 	case viewHelp:

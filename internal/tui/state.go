@@ -6,6 +6,7 @@ import (
 	"github.com/sant0-9/pulp/internal/converter"
 	"github.com/sant0-9/pulp/internal/intent"
 	"github.com/sant0-9/pulp/internal/llm"
+	"github.com/sant0-9/pulp/internal/pipeline"
 )
 
 type state struct {
@@ -48,6 +49,11 @@ type state struct {
 	// Intent
 	currentIntent *intent.Intent
 	parsingIntent bool
+
+	// Pipeline
+	pipelineProgress *pipeline.Progress
+	pipelineResult   *pipeline.Result
+	processingError  error
 }
 
 type message struct {
