@@ -20,20 +20,31 @@ func NewProvider(cfg *config.Config) (Provider, error) {
 		if cfg.APIKey == "" {
 			return nil, fmt.Errorf("groq requires an API key")
 		}
-		// Will be implemented in Phase 9
-		return nil, fmt.Errorf("groq provider not yet implemented")
+		return NewGroqProvider(cfg.APIKey, cfg.Model), nil
 
 	case "openai":
 		if cfg.APIKey == "" {
 			return nil, fmt.Errorf("openai requires an API key")
 		}
-		return nil, fmt.Errorf("openai provider not yet implemented")
+		return NewOpenAIProvider(cfg.APIKey, cfg.Model), nil
 
 	case "anthropic":
 		if cfg.APIKey == "" {
 			return nil, fmt.Errorf("anthropic requires an API key")
 		}
-		return nil, fmt.Errorf("anthropic provider not yet implemented")
+		return NewAnthropicProvider(cfg.APIKey, cfg.Model), nil
+
+	case "openrouter":
+		if cfg.APIKey == "" {
+			return nil, fmt.Errorf("openrouter requires an API key")
+		}
+		return NewOpenRouterProvider(cfg.APIKey, cfg.Model), nil
+
+	case "custom":
+		if cfg.BaseURL == "" {
+			return nil, fmt.Errorf("custom provider requires base_url")
+		}
+		return NewCustomProvider(cfg.BaseURL, cfg.APIKey, cfg.Model), nil
 
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", cfg.Provider)
