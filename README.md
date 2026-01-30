@@ -24,6 +24,12 @@
 
 ---
 
+<p align="center">
+  <img src="assets/screenshot.png" alt="Pulp Screenshot" width="700">
+</p>
+
+---
+
 ## What is Pulp?
 
 Pulp is a terminal-based document intelligence tool that combines LLM-powered conversations with document processing. Drop a PDF, ask questions, extract insights, or just chat - all from your terminal.
