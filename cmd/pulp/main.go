@@ -11,11 +11,13 @@ import (
 var version = "dev"
 
 func main() {
+	app := tui.NewApp()
 	p := tea.NewProgram(
-		tui.NewApp(),
+		app,
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
+	app.SetProgram(p)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

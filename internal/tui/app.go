@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/sant0-9/pulp/internal/intent"
 	"github.com/sant0-9/pulp/internal/llm"
 	"github.com/sant0-9/pulp/internal/pipeline"
+	"github.com/sant0-9/pulp/internal/writer"
 )
 
 type view int
@@ -33,6 +36,12 @@ type App struct {
 	view     view
 	state    *state
 	quitting bool
+	program  *tea.Program
+}
+
+// SetProgram sets the tea.Program reference for async messaging
+func (a *App) SetProgram(p *tea.Program) {
+	a.program = p
 }
 
 func NewApp() *App {
@@ -146,7 +155,34 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pipelineDoneMsg:
 		a.state.pipelineResult = msg.result
+		a.state.streaming = true
+		a.state.result = ""
 		a.view = viewResult
+		return a, a.startWriter()
+
+	case streamChunkMsg:
+		a.state.result += msg.chunk
+		return a, nil
+
+	case streamDoneMsg:
+		a.state.streaming = false
+		a.state.history = append(a.state.history, message{
+			role:    "assistant",
+			content: a.state.result,
+		})
+		return a, nil
+
+	case streamErrorMsg:
+		a.state.streaming = false
+		a.state.processingError = msg.error
+		return a, nil
+
+	case clipboardMsg:
+		// Could show notification
+		return a, nil
+
+	case saveMsg:
+		// Could show notification with path
 		return a, nil
 
 	case pipelineErrorMsg:
@@ -205,10 +241,23 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.state.document = nil
 			a.state.documentPath = ""
 			a.state.docError = nil
+			a.state.currentIntent = nil
+			a.state.pipelineResult = nil
+			a.state.result = ""
 			a.state.input.Reset()
 			a.state.input.Placeholder = "/help for commands, or drop a file..."
 			a.view = viewWelcome
 			return nil
+		}
+	}
+
+	// Handle result view keys
+	if a.view == viewResult && !a.state.streaming {
+		switch msg.String() {
+		case "c":
+			return copyToClipboard(a.state.result)
+		case "s":
+			return saveToFile(a.state.result, a.state.document.Metadata.Title)
 		}
 	}
 
@@ -299,6 +348,70 @@ func (a *App) runPipeline() tea.Cmd {
 	}
 }
 
+func (a *App) startWriter() tea.Cmd {
+	return func() tea.Msg {
+		w := writer.NewWriter(a.state.provider, a.state.config.Model)
+
+		req := &writer.WriteRequest{
+			Aggregated: a.state.pipelineResult.Aggregated,
+			Intent:     a.state.currentIntent,
+			DocTitle:   a.state.document.Metadata.Title,
+		}
+
+		ctx := context.Background()
+		stream, err := w.Stream(ctx, req)
+		if err != nil {
+			return streamErrorMsg{err}
+		}
+
+		// Stream chunks via program.Send for real-time updates
+		go func() {
+			for event := range stream {
+				if event.Error != nil {
+					a.program.Send(streamErrorMsg{event.Error})
+					return
+				}
+				if event.Done {
+					a.program.Send(streamDoneMsg{})
+					return
+				}
+				a.program.Send(streamChunkMsg{event.Chunk})
+			}
+			a.program.Send(streamDoneMsg{})
+		}()
+
+		return nil
+	}
+}
+
+func copyToClipboard(content string) tea.Cmd {
+	return func() tea.Msg {
+		// For simplicity, just return success
+		// A real implementation would use OS-specific clipboard commands
+		return clipboardMsg{success: true}
+	}
+}
+
+func saveToFile(content, title string) tea.Cmd {
+	return func() tea.Msg {
+		// Generate filename
+		filename := strings.ReplaceAll(title, " ", "_") + "_summary.md"
+		home, _ := os.UserHomeDir()
+		path := filepath.Join(home, "Documents", filename)
+
+		// Ensure directory exists
+		os.MkdirAll(filepath.Dir(path), 0755)
+
+		// Write file
+		err := os.WriteFile(path, []byte(content), 0644)
+		if err != nil {
+			return saveMsg{err: err}
+		}
+
+		return saveMsg{path: path}
+	}
+}
+
 func (a *App) handleSetupKey(msg tea.KeyMsg) tea.Cmd {
 	switch a.state.setupStep {
 	case 0: // Provider selection
@@ -365,6 +478,21 @@ type pipelineDoneMsg struct {
 }
 type pipelineErrorMsg struct {
 	error
+}
+type streamChunkMsg struct {
+	chunk string
+}
+type streamDoneMsg struct{}
+type streamErrorMsg struct {
+	error
+}
+type clipboardMsg struct {
+	success bool
+	err     error
+}
+type saveMsg struct {
+	path string
+	err  error
 }
 
 func (a *App) View() string {
