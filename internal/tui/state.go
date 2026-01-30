@@ -37,8 +37,9 @@ type state struct {
 	// Input
 	input textinput.Model
 
-	// History
-	history []message
+	// History and follow-up tracking
+	history    []message
+	isFollowUp bool
 
 	// Provider
 	provider      llm.Provider

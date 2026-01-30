@@ -24,11 +24,20 @@ func NewWriter(provider llm.Provider, model string) *Writer {
 	}
 }
 
+// Message represents a conversation message
+type Message struct {
+	Role    string
+	Content string
+}
+
 // WriteRequest contains everything needed to generate output
 type WriteRequest struct {
-	Aggregated *pipeline.AggregatedContent
-	Intent     *intent.Intent
-	DocTitle   string
+	Aggregated     *pipeline.AggregatedContent
+	Intent         *intent.Intent
+	DocTitle       string
+	History        []Message // Conversation history
+	IsFollowUp     bool      // Whether this is a follow-up request
+	PreviousResult string    // Previous result for revisions
 }
 
 // Write generates the final output (non-streaming)
@@ -79,7 +88,29 @@ func (w *Writer) buildPrompt(req *WriteRequest) *prompt {
 	var system strings.Builder
 	i := req.Intent
 
-	// Base instruction
+	// Handle follow-up mode
+	if req.IsFollowUp && req.PreviousResult != "" {
+		system.WriteString("You are a skilled writer helping revise content. ")
+		system.WriteString("The user has already received a response and wants changes. ")
+		system.WriteString(fmt.Sprintf("\nWrite in a %s style for %s. ",
+			i.ToneDescription(), i.AudienceDescription()))
+
+		if i.MaxWords != nil {
+			system.WriteString(fmt.Sprintf("Keep the response under %d words. ", *i.MaxWords))
+		}
+
+		system.WriteString(fmt.Sprintf("\n\nUser's revision request: \"%s\"", i.RawPrompt))
+
+		// User content includes previous result
+		user := fmt.Sprintf("Previous response to revise:\n\n%s", req.PreviousResult)
+
+		return &prompt{
+			System: system.String(),
+			User:   user,
+		}
+	}
+
+	// Original mode - base instruction
 	system.WriteString("You are a skilled writer. ")
 
 	// Action

@@ -146,6 +146,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case intentParsedMsg:
 		a.state.parsingIntent = false
 		a.state.currentIntent = msg.intent
+
+		if a.state.isFollowUp {
+			// Skip pipeline, go straight to writer (reuse cached extraction)
+			a.state.streaming = true
+			a.state.result = ""
+			a.view = viewResult
+			return a, a.startWriter()
+		}
+
+		// First time: run full pipeline
 		a.view = viewProcessing
 		return a, a.runPipeline()
 
@@ -170,7 +180,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			role:    "assistant",
 			content: a.state.result,
 		})
-		return a, nil
+		a.state.input.Focus() // Focus input for follow-up
+		return a, textinput.Blink
 
 	case streamErrorMsg:
 		a.state.streaming = false
@@ -233,6 +244,20 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 				return a.parseIntent(instruction)
 			}
 		}
+		// Handle result view follow-up
+		if a.view == viewResult && !a.state.streaming {
+			instruction := strings.TrimSpace(a.state.input.Value())
+			if instruction != "" {
+				// Add user message to history
+				a.state.history = append(a.state.history, message{
+					role:    "user",
+					content: instruction,
+				})
+				a.state.isFollowUp = true
+				a.state.input.Reset()
+				return a.parseIntent(instruction)
+			}
+		}
 	}
 
 	// Handle 'n' for new document
@@ -244,6 +269,8 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 			a.state.currentIntent = nil
 			a.state.pipelineResult = nil
 			a.state.result = ""
+			a.state.history = nil      // Clear history
+			a.state.isFollowUp = false // Reset flag
 			a.state.input.Reset()
 			a.state.input.Placeholder = "/help for commands, or drop a file..."
 			a.view = viewWelcome
@@ -352,10 +379,34 @@ func (a *App) startWriter() tea.Cmd {
 	return func() tea.Msg {
 		w := writer.NewWriter(a.state.provider, a.state.config.Model)
 
+		// Convert history to writer format
+		var history []writer.Message
+		for _, m := range a.state.history {
+			history = append(history, writer.Message{
+				Role:    m.role,
+				Content: m.content,
+			})
+		}
+
+		// Get previous result for follow-ups
+		var previousResult string
+		if a.state.isFollowUp && len(a.state.history) > 0 {
+			// Find last assistant message
+			for i := len(a.state.history) - 1; i >= 0; i-- {
+				if a.state.history[i].role == "assistant" {
+					previousResult = a.state.history[i].content
+					break
+				}
+			}
+		}
+
 		req := &writer.WriteRequest{
-			Aggregated: a.state.pipelineResult.Aggregated,
-			Intent:     a.state.currentIntent,
-			DocTitle:   a.state.document.Metadata.Title,
+			Aggregated:     a.state.pipelineResult.Aggregated,
+			Intent:         a.state.currentIntent,
+			DocTitle:       a.state.document.Metadata.Title,
+			History:        history,
+			IsFollowUp:     a.state.isFollowUp,
+			PreviousResult: previousResult,
 		}
 
 		ctx := context.Background()
