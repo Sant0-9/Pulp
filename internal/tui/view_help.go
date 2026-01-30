@@ -19,9 +19,12 @@ func (a *App) renderHelp() string {
 
 	// Commands
 	commands := []string{
-		"  /help, /h      Show this help",
-		"  /settings, /s  Open settings",
-		"  /quit, /q      Quit pulp",
+		"  /help, /h        Show this help",
+		"  /settings, /s    Open settings",
+		"  /skills          List installed skills",
+		"  /new-skill       Create a new skill with AI",
+		"  /<skill-name>    Use a specific skill",
+		"  /quit, /q        Quit pulp",
 		"",
 		"  Or drop a file path to process a document",
 	}

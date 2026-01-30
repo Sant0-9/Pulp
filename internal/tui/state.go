@@ -62,6 +62,21 @@ type state struct {
 	generatingSkill  bool
 	newSkillError    error
 	lastCreatedSkill string
+
+	// Command palette
+	cmdPaletteActive   bool
+	cmdPaletteSelected int
+	cmdPaletteItems    []cmdItem
+
+	// Settings sub-views
+	settingsMode     string // "", "provider", "model", "apikey"
+	settingsSelected int
+	modelInput       textinput.Model
+}
+
+type cmdItem struct {
+	cmd  string
+	desc string
 }
 
 type message struct {
@@ -81,12 +96,18 @@ func newState() *state {
 	apiKey.CharLimit = 200
 	apiKey.Width = 50
 
+	modelInput := textinput.New()
+	modelInput.Placeholder = "Enter model name..."
+	modelInput.CharLimit = 100
+	modelInput.Width = 40
+
 	// Load skill index (errors are ignored - skills are optional)
 	skillIdx, _ := skill.NewSkillIndex()
 
 	return &state{
 		input:       input,
 		apiKeyInput: apiKey,
+		modelInput:  modelInput,
 		skillIndex:  skillIdx,
 	}
 }

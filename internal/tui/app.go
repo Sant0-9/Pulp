@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -223,19 +224,101 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.state.apiKeyInput, cmd = a.state.apiKeyInput.Update(msg)
 		cmds = append(cmds, cmd)
-	} else if a.view == viewWelcome || a.view == viewDocument || a.view == viewResult || a.view == viewNewSkill {
+	} else if a.view == viewSettings && a.state.settingsMode == "model" {
 		var cmd tea.Cmd
-		a.state.input, cmd = a.state.input.Update(msg)
+		a.state.modelInput, cmd = a.state.modelInput.Update(msg)
 		cmds = append(cmds, cmd)
+	} else if a.view == viewSettings && a.state.settingsMode == "apikey" {
+		var cmd tea.Cmd
+		a.state.apiKeyInput, cmd = a.state.apiKeyInput.Update(msg)
+		cmds = append(cmds, cmd)
+	} else if a.view == viewWelcome || a.view == viewDocument || a.view == viewResult || a.view == viewNewSkill {
+		// Skip input update if palette is handling navigation keys
+		skipInput := false
+		if a.state.cmdPaletteActive && a.view == viewWelcome {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "up", "down", "ctrl+p", "ctrl+n", "tab":
+					skipInput = true
+				}
+			}
+		}
+
+		if !skipInput {
+			var cmd tea.Cmd
+			a.state.input, cmd = a.state.input.Update(msg)
+			cmds = append(cmds, cmd)
+
+			// Update command palette when on welcome view
+			if a.view == viewWelcome {
+				a.updateCommandPalette()
+			}
+		}
 	}
 
 	return a, tea.Batch(cmds...)
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
+	// Handle command palette navigation when active
+	if a.state.cmdPaletteActive && a.view == viewWelcome {
+		switch msg.String() {
+		case "up", "ctrl+p":
+			if a.state.cmdPaletteSelected > 0 {
+				a.state.cmdPaletteSelected--
+			}
+			return nil
+		case "down", "ctrl+n":
+			if a.state.cmdPaletteSelected < len(a.state.cmdPaletteItems)-1 {
+				a.state.cmdPaletteSelected++
+			}
+			return nil
+		case "tab":
+			// Autocomplete selected command
+			if len(a.state.cmdPaletteItems) > 0 {
+				selected := a.state.cmdPaletteItems[a.state.cmdPaletteSelected]
+				a.state.input.SetValue(selected.cmd)
+				a.state.input.SetCursor(len(selected.cmd))
+				a.updateCommandPalette()
+			}
+			return nil
+		case "enter":
+			// Execute selected command
+			if len(a.state.cmdPaletteItems) > 0 {
+				selected := a.state.cmdPaletteItems[a.state.cmdPaletteSelected]
+				a.state.input.SetValue(selected.cmd)
+				a.state.cmdPaletteActive = false
+				return a.handleInput()
+			}
+		case "esc":
+			a.state.cmdPaletteActive = false
+			a.state.input.Reset()
+			return nil
+		}
+	}
+
 	switch {
 	case key.Matches(msg, keys.Quit):
-		if a.view == viewSettings || a.view == viewHelp || a.view == viewSkills || a.view == viewNewSkill {
+		if a.state.cmdPaletteActive {
+			a.state.cmdPaletteActive = false
+			a.state.input.Reset()
+			return nil
+		}
+		if a.view == viewSettings {
+			if a.state.settingsMode != "" {
+				// Go back to main settings
+				a.state.settingsMode = ""
+				a.state.modelInput.Blur()
+				a.state.apiKeyInput.Blur()
+				return nil
+			}
+			// Go back to welcome
+			a.view = viewWelcome
+			a.state.input.Reset()
+			a.state.input.Placeholder = "/help for commands, or drop a file..."
+			return nil
+		}
+		if a.view == viewHelp || a.view == viewSkills || a.view == viewNewSkill {
 			a.view = viewWelcome
 			a.state.input.Reset()
 			a.state.input.Placeholder = "/help for commands, or drop a file..."
@@ -252,6 +335,7 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case key.Matches(msg, keys.Enter):
 		if a.view == viewWelcome && a.state.providerReady {
+			a.state.cmdPaletteActive = false
 			return a.handleInput()
 		}
 		if a.view == viewDocument && a.state.providerReady {
@@ -316,13 +400,81 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
+	// Handle welcome view shortcuts (always available, even with provider error)
+	if a.view == viewWelcome && !a.state.cmdPaletteActive {
+		inputVal := a.state.input.Value()
+		// Only handle shortcuts when input is empty (user not typing)
+		if inputVal == "" {
+			switch msg.String() {
+			case "s":
+				a.view = viewSettings
+				return nil
+			case "?":
+				a.view = viewHelp
+				return nil
+			}
+		}
+	}
+
 	// View-specific handling
 	switch a.view {
 	case viewSetup:
 		return a.handleSetupKey(msg)
+	case viewSettings:
+		return a.handleSettingsKey(msg)
 	}
 
 	return nil
+}
+
+func (a *App) updateCommandPalette() {
+	input := a.state.input.Value()
+
+	// Only show palette when input starts with "/"
+	if len(input) == 0 || input[0] != '/' {
+		a.state.cmdPaletteActive = false
+		a.state.cmdPaletteItems = nil
+		return
+	}
+
+	// Build command list
+	commands := []cmdItem{
+		{"/help", "Show help"},
+		{"/settings", "Open settings"},
+		{"/skills", "List installed skills"},
+		{"/new-skill", "Create a new skill"},
+		{"/quit", "Exit pulp"},
+	}
+
+	// Add skill commands
+	if a.state.skillIndex != nil {
+		for _, name := range a.state.skillIndex.List() {
+			desc := "Use skill"
+			if meta := a.state.skillIndex.Get(name); meta != nil && meta.Description != "" {
+				desc = meta.Description
+				if len(desc) > 50 {
+					desc = desc[:47] + "..."
+				}
+			}
+			commands = append(commands, cmdItem{"/" + name, desc})
+		}
+	}
+
+	// Filter by prefix
+	var filtered []cmdItem
+	for _, c := range commands {
+		if strings.HasPrefix(c.cmd, input) {
+			filtered = append(filtered, c)
+		}
+	}
+
+	a.state.cmdPaletteItems = filtered
+	a.state.cmdPaletteActive = len(filtered) > 0
+
+	// Reset selection if out of bounds
+	if a.state.cmdPaletteSelected >= len(filtered) {
+		a.state.cmdPaletteSelected = 0
+	}
 }
 
 func (a *App) handleInput() tea.Cmd {
@@ -364,7 +516,31 @@ func (a *App) handleInput() tea.Cmd {
 		case cmd == "/quit" || cmd == "/q":
 			a.quitting = true
 			return tea.Quit
+		default:
+			// Check if it's a skill command
+			skillName := strings.TrimPrefix(cmd, "/")
+			if a.state.skillIndex != nil && a.state.skillIndex.Get(skillName) != nil {
+				// TODO: Execute skill
+				a.state.input.Reset()
+				return nil
+			}
+			// Check if it looks like an absolute file path (has more path separators)
+			if strings.Count(input, "/") > 1 || strings.Contains(input, ".") {
+				// Treat as file path
+				break
+			}
+			// Unknown command
+			a.state.docError = fmt.Errorf("unknown command: %s (try /help)", input)
+			a.state.input.Reset()
+			return nil
 		}
+	}
+
+	// Check if input looks like a file path
+	if !looksLikeFilePath(input) {
+		a.state.docError = fmt.Errorf("drop a file path to process, or use /help for commands")
+		a.state.input.Reset()
+		return nil
 	}
 
 	// Handle file path input
@@ -373,6 +549,33 @@ func (a *App) handleInput() tea.Cmd {
 	a.state.docError = nil
 	a.state.input.Reset()
 	return a.loadDocument(input)
+}
+
+// looksLikeFilePath checks if input appears to be a file path
+func looksLikeFilePath(input string) bool {
+	// Starts with path indicators
+	if strings.HasPrefix(input, "./") ||
+		strings.HasPrefix(input, "../") ||
+		strings.HasPrefix(input, "~/") ||
+		strings.HasPrefix(input, "/") {
+		return true
+	}
+
+	// Contains path separator
+	if strings.Contains(input, "/") || strings.Contains(input, "\\") {
+		return true
+	}
+
+	// Has common document extensions
+	lower := strings.ToLower(input)
+	extensions := []string{".pdf", ".txt", ".md", ".doc", ".docx", ".html", ".htm", ".rtf", ".odt"}
+	for _, ext := range extensions {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (a *App) loadDocument(path string) tea.Cmd {
@@ -568,6 +771,120 @@ func (a *App) finishSetup() tea.Cmd {
 		}
 		return setupCompleteMsg{}
 	}
+}
+
+func (a *App) handleSettingsKey(msg tea.KeyMsg) tea.Cmd {
+	switch a.state.settingsMode {
+	case "": // Main settings menu
+		switch msg.String() {
+		case "p":
+			a.state.settingsMode = "provider"
+			a.state.settingsSelected = 0
+			// Find current provider index
+			for i, p := range config.Providers {
+				if p.ID == a.state.config.Provider {
+					a.state.settingsSelected = i
+					break
+				}
+			}
+			return nil
+		case "m":
+			a.state.settingsMode = "model"
+			a.state.settingsSelected = 0
+			// Find current model index
+			provider := config.GetProvider(a.state.config.Provider)
+			if provider != nil {
+				for i, m := range provider.Models {
+					if m == a.state.config.Model {
+						a.state.settingsSelected = i
+						break
+					}
+				}
+			}
+			return nil
+		case "k":
+			a.state.settingsMode = "apikey"
+			a.state.apiKeyInput.SetValue("")
+			a.state.apiKeyInput.Focus()
+			return textinput.Blink
+		case "r":
+			// Reset to setup wizard
+			a.state.needsSetup = true
+			a.state.setupStep = 0
+			a.state.selectedProvider = 0
+			a.view = viewSetup
+			return nil
+		}
+
+	case "provider":
+		switch msg.String() {
+		case "up", "k":
+			if a.state.settingsSelected > 0 {
+				a.state.settingsSelected--
+			}
+		case "down", "j":
+			if a.state.settingsSelected < len(config.Providers)-1 {
+				a.state.settingsSelected++
+			}
+		case "enter":
+			provider := config.Providers[a.state.settingsSelected]
+			a.state.config.Provider = provider.ID
+			a.state.config.Model = provider.DefaultModel
+			a.state.config.Save()
+			a.state.settingsMode = ""
+			// Reconnect provider
+			return a.testProvider()
+		case "esc":
+			a.state.settingsMode = ""
+		}
+
+	case "model":
+		provider := config.GetProvider(a.state.config.Provider)
+		if provider == nil {
+			a.state.settingsMode = ""
+			return nil
+		}
+		switch msg.String() {
+		case "up", "k":
+			if a.state.settingsSelected > 0 {
+				a.state.settingsSelected--
+			}
+		case "down", "j":
+			if a.state.settingsSelected < len(provider.Models)-1 {
+				a.state.settingsSelected++
+			}
+		case "enter":
+			if a.state.settingsSelected < len(provider.Models) {
+				a.state.config.Model = provider.Models[a.state.settingsSelected]
+				a.state.config.Save()
+			}
+			a.state.settingsMode = ""
+			return nil
+		case "esc":
+			a.state.settingsMode = ""
+			return nil
+		}
+
+	case "apikey":
+		switch msg.String() {
+		case "enter":
+			key := a.state.apiKeyInput.Value()
+			if key != "" {
+				a.state.config.APIKey = key
+				a.state.config.Save()
+			}
+			a.state.settingsMode = ""
+			a.state.apiKeyInput.Blur()
+			// Reconnect provider
+			return a.testProvider()
+		case "esc":
+			a.state.settingsMode = ""
+			a.state.apiKeyInput.Blur()
+			return nil
+		}
+	}
+
+	return nil
 }
 
 type setupCompleteMsg struct{}

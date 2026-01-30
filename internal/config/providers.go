@@ -25,8 +25,8 @@ var Providers = []ProviderInfo{
 		Description:  "Very fast, cheap",
 		NeedsAPIKey:  true,
 		SignupURL:    "https://console.groq.com/keys",
-		Models:       []string{"llama-3.1-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"},
-		DefaultModel: "llama-3.1-70b-versatile",
+		Models:       []string{"llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.2-3b-preview", "mixtral-8x7b-32768", "gemma2-9b-it"},
+		DefaultModel: "llama-3.1-8b-instant",
 	},
 	{
 		ID:           "openai",

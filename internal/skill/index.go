@@ -3,6 +3,7 @@ package skill
 import (
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // SkillIndex manages all available skills
@@ -82,7 +83,7 @@ func (idx *SkillIndex) GetAll() []*SkillMetadata {
 	return result
 }
 
-// List returns all skill names
+// List returns all skill names (sorted alphabetically)
 func (idx *SkillIndex) List() []string {
 	if idx == nil {
 		return nil
@@ -91,6 +92,7 @@ func (idx *SkillIndex) List() []string {
 	for name := range idx.skills {
 		result = append(result, name)
 	}
+	sort.Strings(result)
 	return result
 }
 
