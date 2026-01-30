@@ -15,6 +15,7 @@ import (
 	"github.com/sant0-9/pulp/internal/intent"
 	"github.com/sant0-9/pulp/internal/llm"
 	"github.com/sant0-9/pulp/internal/pipeline"
+	"github.com/sant0-9/pulp/internal/skill"
 	"github.com/sant0-9/pulp/internal/writer"
 )
 
@@ -29,6 +30,7 @@ const (
 	viewSettings
 	viewHelp
 	viewSkills
+	viewNewSkill
 )
 
 type App struct {
@@ -201,6 +203,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.state.processingError = msg.error
 		a.view = viewDocument
 		return a, nil
+
+	case skillGeneratedMsg:
+		a.state.generatingSkill = false
+		a.state.lastCreatedSkill = msg.skillName
+		// Reload skill index
+		a.state.skillIndex, _ = skill.NewSkillIndex()
+		a.view = viewSkills
+		return a, nil
+
+	case skillGenerationErrorMsg:
+		a.state.generatingSkill = false
+		a.state.newSkillError = msg.error
+		return a, nil
 	}
 
 	// Update text inputs based on view
@@ -208,7 +223,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.state.apiKeyInput, cmd = a.state.apiKeyInput.Update(msg)
 		cmds = append(cmds, cmd)
-	} else if a.view == viewWelcome || a.view == viewDocument || a.view == viewResult {
+	} else if a.view == viewWelcome || a.view == viewDocument || a.view == viewResult || a.view == viewNewSkill {
 		var cmd tea.Cmd
 		a.state.input, cmd = a.state.input.Update(msg)
 		cmds = append(cmds, cmd)
@@ -220,8 +235,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, keys.Quit):
-		if a.view == viewSettings || a.view == viewHelp || a.view == viewSkills {
+		if a.view == viewSettings || a.view == viewHelp || a.view == viewSkills || a.view == viewNewSkill {
 			a.view = viewWelcome
+			a.state.input.Reset()
+			a.state.input.Placeholder = "/help for commands, or drop a file..."
 			return nil
 		}
 		if a.view == viewSetup && a.state.setupStep == 1 {
@@ -257,6 +274,16 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 				a.state.isFollowUp = true
 				a.state.input.Reset()
 				return a.parseIntent(instruction)
+			}
+		}
+		// Handle new skill creation
+		if a.view == viewNewSkill && !a.state.generatingSkill {
+			desc := strings.TrimSpace(a.state.input.Value())
+			if desc != "" {
+				a.state.input.Reset()
+				a.state.generatingSkill = true
+				a.state.newSkillError = nil
+				return a.generateSkill(desc)
 			}
 		}
 	}
@@ -320,6 +347,20 @@ func (a *App) handleInput() tea.Cmd {
 			a.view = viewSkills
 			a.state.input.Reset()
 			return nil
+		case strings.HasPrefix(cmd, "/new-skill"):
+			// Extract description after /new-skill
+			desc := strings.TrimSpace(strings.TrimPrefix(input, "/new-skill"))
+			if desc == "" {
+				// Show skill creation view for input
+				a.view = viewNewSkill
+				a.state.input.Reset()
+				a.state.input.Placeholder = "Describe the skill you want to create..."
+				return nil
+			}
+			// Generate skill directly
+			a.state.input.Reset()
+			a.state.generatingSkill = true
+			return a.generateSkill(desc)
 		case cmd == "/quit" || cmd == "/q":
 			a.quitting = true
 			return tea.Quit
@@ -363,6 +404,20 @@ func (a *App) parseIntent(instruction string) tea.Cmd {
 		}
 
 		return intentParsedMsg{parsed}
+	}
+}
+
+func (a *App) generateSkill(description string) tea.Cmd {
+	return func() tea.Msg {
+		generator := skill.NewGenerator(a.state.provider, a.state.config.Model)
+		ctx := context.Background()
+
+		newSkill, err := generator.Generate(ctx, description)
+		if err != nil {
+			return skillGenerationErrorMsg{err}
+		}
+
+		return skillGeneratedMsg{skillName: newSkill.Name}
 	}
 }
 
@@ -550,6 +605,12 @@ type saveMsg struct {
 	path string
 	err  error
 }
+type skillGeneratedMsg struct {
+	skillName string
+}
+type skillGenerationErrorMsg struct {
+	error
+}
 
 func (a *App) View() string {
 	if a.quitting {
@@ -573,6 +634,8 @@ func (a *App) View() string {
 		return a.renderHelp()
 	case viewSkills:
 		return a.renderSkills()
+	case viewNewSkill:
+		return a.renderNewSkill()
 	default:
 		return a.renderWelcome()
 	}

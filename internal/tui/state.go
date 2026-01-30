@@ -58,7 +58,10 @@ type state struct {
 	processingError  error
 
 	// Skills
-	skillIndex *skill.SkillIndex
+	skillIndex       *skill.SkillIndex
+	generatingSkill  bool
+	newSkillError    error
+	lastCreatedSkill string
 }
 
 type message struct {
