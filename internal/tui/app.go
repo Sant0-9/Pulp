@@ -28,6 +28,7 @@ const (
 	viewResult
 	viewSettings
 	viewHelp
+	viewSkills
 )
 
 type App struct {
@@ -219,7 +220,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, keys.Quit):
-		if a.view == viewSettings || a.view == viewHelp {
+		if a.view == viewSettings || a.view == viewHelp || a.view == viewSkills {
 			a.view = viewWelcome
 			return nil
 		}
@@ -315,6 +316,10 @@ func (a *App) handleInput() tea.Cmd {
 			a.view = viewSettings
 			a.state.input.Reset()
 			return nil
+		case cmd == "/skills":
+			a.view = viewSkills
+			a.state.input.Reset()
+			return nil
 		case cmd == "/quit" || cmd == "/q":
 			a.quitting = true
 			return tea.Quit
@@ -348,7 +353,7 @@ func (a *App) loadDocument(path string) tea.Cmd {
 
 func (a *App) parseIntent(instruction string) tea.Cmd {
 	return func() tea.Msg {
-		parser := intent.NewParser(a.state.provider, a.state.config.Model)
+		parser := intent.NewParser(a.state.provider, a.state.config.Model, a.state.skillIndex)
 		ctx := context.Background()
 
 		parsed, err := parser.Parse(ctx, instruction)
@@ -566,6 +571,8 @@ func (a *App) View() string {
 		return a.renderSettings()
 	case viewHelp:
 		return a.renderHelp()
+	case viewSkills:
+		return a.renderSkills()
 	default:
 		return a.renderWelcome()
 	}

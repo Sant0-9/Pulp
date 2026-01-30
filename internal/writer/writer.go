@@ -73,6 +73,17 @@ func (w *Writer) Stream(ctx context.Context, req *WriteRequest) (<-chan llm.Stre
 }
 
 func (w *Writer) buildMessages(req *WriteRequest) []llm.Message {
+	var messages []llm.Message
+
+	// Build system prompt with skill instructions if present
+	if req.Intent.HasSkill() {
+		systemPrompt := buildSkillSystemPrompt(req.Intent.MatchedSkill.Body)
+		messages = append(messages, llm.Message{
+			Role:    "system",
+			Content: systemPrompt,
+		})
+	}
+
 	// Get document content
 	docContent := req.Aggregated.FormatForWriter()
 	if req.DocTitle != "" {
@@ -81,19 +92,26 @@ func (w *Writer) buildMessages(req *WriteRequest) []llm.Message {
 
 	if req.IsFollowUp && req.PreviousResult != "" {
 		// Follow-up: include previous result for revision
-		return []llm.Message{
-			{
-				Role:    "user",
-				Content: fmt.Sprintf("Here is my previous response:\n\n%s\n\n---\n\n%s", req.PreviousResult, req.Intent.RawPrompt),
-			},
+		userContent := fmt.Sprintf("Previous response:\n\n%s\n\n---\n\n%s", req.PreviousResult, req.Intent.RawPrompt)
+		messages = append(messages, llm.Message{
+			Role:    "user",
+			Content: userContent,
+		})
+	} else {
+		// First request: document + instruction
+		userContent := docContent
+		if req.Intent.RawPrompt != "" {
+			userContent = fmt.Sprintf("%s\n\n---\n\n%s", docContent, req.Intent.RawPrompt)
 		}
+		messages = append(messages, llm.Message{
+			Role:    "user",
+			Content: userContent,
+		})
 	}
 
-	// First request: document + instruction
-	return []llm.Message{
-		{
-			Role:    "user",
-			Content: fmt.Sprintf("%s\n\n---\n\n%s", docContent, req.Intent.RawPrompt),
-		},
-	}
+	return messages
+}
+
+func buildSkillSystemPrompt(skillBody string) string {
+	return fmt.Sprintf("Follow these instructions when processing the document:\n\n%s", skillBody)
 }

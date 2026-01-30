@@ -7,6 +7,7 @@ import (
 	"github.com/sant0-9/pulp/internal/intent"
 	"github.com/sant0-9/pulp/internal/llm"
 	"github.com/sant0-9/pulp/internal/pipeline"
+	"github.com/sant0-9/pulp/internal/skill"
 )
 
 type state struct {
@@ -55,6 +56,9 @@ type state struct {
 	pipelineProgress *pipeline.Progress
 	pipelineResult   *pipeline.Result
 	processingError  error
+
+	// Skills
+	skillIndex *skill.SkillIndex
 }
 
 type message struct {
@@ -74,8 +78,12 @@ func newState() *state {
 	apiKey.CharLimit = 200
 	apiKey.Width = 50
 
+	// Load skill index (errors are ignored - skills are optional)
+	skillIdx, _ := skill.NewSkillIndex()
+
 	return &state{
 		input:       input,
 		apiKeyInput: apiKey,
+		skillIndex:  skillIdx,
 	}
 }
