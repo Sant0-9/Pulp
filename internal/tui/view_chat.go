@@ -198,29 +198,31 @@ func (a *App) renderChat() string {
 	}
 	footer.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, status))
 
-	// === COMBINE WITH PROPER SPACING ===
+	// === COMBINE WITH FIXED LAYOUT ===
 	headerContent := header.String()
-	messagesContent := strings.Join(visibleLines, "\n")
 	footerContent := footer.String()
 
-	// Calculate padding to push footer to bottom
+	// Build message area with exact height
+	var messageArea strings.Builder
+	for i, line := range visibleLines {
+		messageArea.WriteString(line)
+		if i < len(visibleLines)-1 {
+			messageArea.WriteString("\n")
+		}
+	}
+
+	// Pad message area to fill available height
 	displayedLines := len(visibleLines)
-	usedLines := headerHeight + displayedLines + inputHeight
-	padding := a.height - usedLines
-	if padding < 0 {
-		padding = 0
+	messagePadding := availableHeight - displayedLines
+	if messagePadding > 0 {
+		if displayedLines > 0 {
+			messageArea.WriteString("\n")
+		}
+		messageArea.WriteString(strings.Repeat("\n", messagePadding-1))
 	}
 
-	var result strings.Builder
-	result.WriteString(headerContent)
-	result.WriteString(messagesContent)
-	if padding > 0 {
-		result.WriteString(strings.Repeat("\n", padding))
-	}
-	result.WriteString("\n")
-	result.WriteString(footerContent)
-
-	return result.String()
+	// Combine: header + messages (fixed height) + footer
+	return headerContent + messageArea.String() + "\n" + footerContent
 }
 
 // wrapText wraps text to fit within maxWidth, preserving words
